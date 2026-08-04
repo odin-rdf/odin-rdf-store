@@ -1,7 +1,9 @@
-package store
+package memstore
+
+import store ".."
 
 import "core:testing"
-import rdf "../../odin-rdf-parser/rdf"
+import rdf "../../../odin-rdf-parser/rdf"
 
 @(private = "file")
 EX :: "http://example.org/"
@@ -30,23 +32,23 @@ test_load_triples_with_rdf_star :: proc(t: ^testing.T) {
 	// _:b0 in two statements is one term: both quads share a subject.
 	says := intern_term(&d, rdf.IRI(EX + "says"))
 	knows := intern_term(&d, rdf.IRI(EX + "knows"))
-	it := match(&ds, Match_Pattern{WILDCARD, says, WILDCARD, WILDCARD})
+	it := match(&ds, store.Match_Pattern{store.WILDCARD, says, store.WILDCARD, store.WILDCARD})
 	q1, ok1 := match_next(&it)
 	testing.expect_value(t, ok1, true)
 	match_destroy(&it)
-	blank_subject := q1[QUAD_S]
-	testing.expect_value(t, id_kind(blank_subject), Term_Kind.Blank_Node)
+	blank_subject := q1[store.QUAD_S]
+	testing.expect_value(t, store.id_kind(blank_subject), store.Term_Kind.Blank_Node)
 
-	it2 := match(&ds, Match_Pattern{blank_subject, knows, WILDCARD, WILDCARD})
+	it2 := match(&ds, store.Match_Pattern{blank_subject, knows, store.WILDCARD, store.WILDCARD})
 	q2, ok2 := match_next(&it2)
 	testing.expect_value(t, ok2, true)
-	testing.expect_value(t, id_kind(q2[QUAD_O]), Term_Kind.Blank_Node)
-	testing.expect(t, q2[QUAD_O] != blank_subject) // _:b1 is its own term
+	testing.expect_value(t, store.id_kind(q2[store.QUAD_O]), store.Term_Kind.Blank_Node)
+	testing.expect(t, q2[store.QUAD_O] != blank_subject) // _:b1 is its own term
 	match_destroy(&it2)
 
 	// The triple term decoded from storage equals the parsed structure.
 	reifies := intern_term(&d, rdf.IRI(EX + "reifies"))
-	it3 := match(&ds, Match_Pattern{WILDCARD, reifies, WILDCARD, WILDCARD})
+	it3 := match(&ds, store.Match_Pattern{store.WILDCARD, reifies, store.WILDCARD, store.WILDCARD})
 	q3, ok3 := match_next(&it3)
 	testing.expect_value(t, ok3, true)
 	match_destroy(&it3)
@@ -55,7 +57,7 @@ test_load_triples_with_rdf_star :: proc(t: ^testing.T) {
 		predicate = rdf.IRI(EX + "p"),
 		object    = rdf.literal("o"),
 	}
-	testing.expect(t, rdf.equal(lookup_term(&d, q3[QUAD_O]), rdf.Term(&expected)))
+	testing.expect(t, rdf.equal(lookup_term(&d, q3[store.QUAD_O]), rdf.Term(&expected)))
 }
 
 @(test)
@@ -82,7 +84,7 @@ test_load_turtle_prefixes_and_anon :: proc(t: ^testing.T) {
 	// Prefixed names expanded: ex:alice matches as a full IRI.
 	alice := intern_term(&d, rdf.IRI(EX + "alice"))
 	knows := intern_term(&d, rdf.IRI(EX + "knows"))
-	from_alice := match(&ds, Match_Pattern{alice, knows, WILDCARD, WILDCARD})
+	from_alice := match(&ds, store.Match_Pattern{alice, knows, store.WILDCARD, store.WILDCARD})
 	defer match_destroy(&from_alice)
 	n := 0
 	for _ in match_next(&from_alice) {
@@ -92,12 +94,12 @@ test_load_turtle_prefixes_and_anon :: proc(t: ^testing.T) {
 
 	// The numeric shorthand parsed as an xsd:integer literal.
 	age := intern_term(&d, rdf.IRI(EX + "age"))
-	it := match(&ds, Match_Pattern{alice, age, WILDCARD, WILDCARD})
+	it := match(&ds, store.Match_Pattern{alice, age, store.WILDCARD, store.WILDCARD})
 	defer match_destroy(&it)
 	q, ok := match_next(&it)
 	testing.expect_value(t, ok, true)
 	forty_two := rdf.literal_typed("42", rdf.IRI("http://www.w3.org/2001/XMLSchema#integer"))
-	testing.expect(t, rdf.equal(lookup_term(&d, q[QUAD_O]), rdf.Term(forty_two)))
+	testing.expect(t, rdf.equal(lookup_term(&d, q[store.QUAD_O]), rdf.Term(forty_two)))
 }
 
 @(test)
@@ -129,7 +131,7 @@ test_load_quads_and_trig_graphs :: proc(t: ^testing.T) {
 	testing.expect_value(t, added2, 3)
 
 	// Default graph holds one quad from each load.
-	in_default := match(&ds, Match_Pattern{WILDCARD, WILDCARD, WILDCARD, DEFAULT_GRAPH})
+	in_default := match(&ds, store.Match_Pattern{store.WILDCARD, store.WILDCARD, store.WILDCARD, store.DEFAULT_GRAPH})
 	defer match_destroy(&in_default)
 	n := 0
 	for _ in match_next(&in_default) {
@@ -139,7 +141,7 @@ test_load_quads_and_trig_graphs :: proc(t: ^testing.T) {
 
 	// The named graph ex:g1 holds one quad from each load.
 	g1 := intern_graph_label(&d, rdf.IRI(EX + "g1"))
-	in_g1 := match(&ds, Match_Pattern{WILDCARD, WILDCARD, WILDCARD, g1})
+	in_g1 := match(&ds, store.Match_Pattern{store.WILDCARD, store.WILDCARD, store.WILDCARD, g1})
 	defer match_destroy(&in_g1)
 	n = 0
 	for _ in match_next(&in_g1) {
@@ -150,10 +152,10 @@ test_load_quads_and_trig_graphs :: proc(t: ^testing.T) {
 	// Blank graph labels were scoped per load: two distinct blank
 	// graphs exist, and the language tag survived the round trip.
 	blanks := 0
-	all := match(&ds, MATCH_ALL)
+	all := match(&ds, store.MATCH_ALL)
 	defer match_destroy(&all)
 	for q in match_next(&all) {
-		if q[QUAD_G] != DEFAULT_GRAPH && id_kind(q[QUAD_G]) == .Blank_Node {
+		if q[store.QUAD_G] != store.DEFAULT_GRAPH && store.id_kind(q[store.QUAD_G]) == .Blank_Node {
 			blanks += 1
 		}
 	}
@@ -161,7 +163,7 @@ test_load_quads_and_trig_graphs :: proc(t: ^testing.T) {
 
 	p := intern_term(&d, rdf.IRI(EX + "p"))
 	chat := intern_term(&d, rdf.literal("chat", "fr"))
-	tagged := match(&ds, Match_Pattern{WILDCARD, p, chat, WILDCARD})
+	tagged := match(&ds, store.Match_Pattern{store.WILDCARD, p, chat, store.WILDCARD})
 	defer match_destroy(&tagged)
 	_, ok := match_next(&tagged)
 	testing.expect_value(t, ok, true)
@@ -241,7 +243,7 @@ test_load_survives_source_buffer_reuse :: proc(t: ^testing.T) {
 			},
 		},
 	}
-	all := match(&ds, MATCH_ALL)
+	all := match(&ds, store.MATCH_ALL)
 	defer match_destroy(&all)
 	found := 0
 	for q in match_next(&all) {

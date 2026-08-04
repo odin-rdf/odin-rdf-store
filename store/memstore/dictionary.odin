@@ -1,8 +1,22 @@
-package store
+// Package memstore is the in-memory reference backend of the match
+// interface (contract: store/interface.odin): a term dictionary
+// interning rdf.Term values to Term_IDs, a permutation-indexed quad
+// dataset, and bulk loaders for the four odin-rdf-parser formats.
+// Append-only in v1; no external dependencies.
+//
+// Lifetime rules: terms returned by lookup_term/decode_quad borrow
+// their strings from dictionary storage and stay valid until
+// dictionary_destroy — no other operation invalidates them. Iterators
+// are valid until their dataset is mutated or destroyed. Every *_init
+// takes `allocator := context.allocator` and owns what it allocates
+// until the matching *_destroy.
+package memstore
+
+import store ".."
 
 import "base:runtime"
 import "core:strings"
-import rdf "../../odin-rdf-parser/rdf"
+import rdf "../../../odin-rdf-parser/rdf"
 
 // Dictionary interns RDF terms to Term_IDs and looks them back up.
 // Interning equal terms (per rdf.equal semantics) returns the same ID;
@@ -16,7 +30,7 @@ import rdf "../../odin-rdf-parser/rdf"
 // dictionary_destroy. The dictionary never garbage-collects: entries
 // live until destroy.
 //
-// Exhausting a kind's counter space (MAX_COUNTER + 1 terms of one
+// Exhausting a kind's counter space (store.MAX_COUNTER + 1 terms of one
 // kind) is treated like out-of-memory: an assertion failure, not an
 // error value. The 64-bit default build cannot reach it in practice.
 Dictionary :: struct {
@@ -26,21 +40,21 @@ Dictionary :: struct {
 	// same owned string (the parser's Intern_Table arrangement).
 	owned: map[string]string,
 
-	// Per-kind entries, indexed by id_counter. Literal strings and the
+	// Per-kind entries, indexed by store.id_counter. Literal strings and the
 	// terms inside triple nodes reference `owned` storage.
 	iris:         [dynamic]string,
 	blanks:       [dynamic]string,
 	literals:     [dynamic]rdf.Literal,
-	triples:      [dynamic][3]Term_ID, // component IDs: s, p, o
+	triples:      [dynamic][3]store.Term_ID, // component IDs: s, p, o
 	triple_nodes: [dynamic]^rdf.Triple, // materialized once at intern time
 
 	// Content -> ID. Keys reference dictionary-owned strings; probing
 	// with borrowed strings works because Odin maps hash and compare
 	// string content, not backing pointers (pinned by a test).
-	iri_ids:     map[string]Term_ID,
-	blank_ids:   map[string]Term_ID,
-	literal_ids: map[rdf.Literal]Term_ID,
-	triple_ids:  map[[3]Term_ID]Term_ID,
+	iri_ids:     map[string]store.Term_ID,
+	blank_ids:   map[string]store.Term_ID,
+	literal_ids: map[rdf.Literal]store.Term_ID,
+	triple_ids:  map[[3]store.Term_ID]store.Term_ID,
 }
 
 // dictionary_init prepares a dictionary; all memory comes from the
@@ -51,12 +65,12 @@ dictionary_init :: proc(d: ^Dictionary, allocator := context.allocator) {
 	d.iris = make([dynamic]string, 0, 8, allocator)
 	d.blanks = make([dynamic]string, 0, 8, allocator)
 	d.literals = make([dynamic]rdf.Literal, 0, 8, allocator)
-	d.triples = make([dynamic][3]Term_ID, 0, 8, allocator)
+	d.triples = make([dynamic][3]store.Term_ID, 0, 8, allocator)
 	d.triple_nodes = make([dynamic]^rdf.Triple, 0, 8, allocator)
-	d.iri_ids = make(map[string]Term_ID, 8, allocator)
-	d.blank_ids = make(map[string]Term_ID, 8, allocator)
-	d.literal_ids = make(map[rdf.Literal]Term_ID, 8, allocator)
-	d.triple_ids = make(map[[3]Term_ID]Term_ID, 8, allocator)
+	d.iri_ids = make(map[string]store.Term_ID, 8, allocator)
+	d.blank_ids = make(map[string]store.Term_ID, 8, allocator)
+	d.literal_ids = make(map[rdf.Literal]store.Term_ID, 8, allocator)
+	d.triple_ids = make(map[[3]store.Term_ID]store.Term_ID, 8, allocator)
 }
 
 // dictionary_destroy frees everything the dictionary owns; every ID
@@ -93,19 +107,19 @@ intern_string :: proc(d: ^Dictionary, s: string) -> string {
 
 @(private)
 check_capacity :: proc(entries: int) {
-	assert(u64(entries) <= MAX_COUNTER, "dictionary: per-kind term capacity exhausted")
+	assert(u64(entries) <= store.MAX_COUNTER, "dictionary: per-kind term capacity exhausted")
 }
 
 // intern_term returns the ID of a term, assigning a fresh one on first
 // sight. A nil term is not a valid RDF term and asserts.
-intern_term :: proc(d: ^Dictionary, term: rdf.Term) -> Term_ID {
+intern_term :: proc(d: ^Dictionary, term: rdf.Term) -> store.Term_ID {
 	switch v in term {
 	case rdf.IRI:
 		if id, ok := d.iri_ids[string(v)]; ok {
 			return id
 		}
 		check_capacity(len(d.iris))
-		id := make_id(.IRI, u64(len(d.iris)))
+		id := store.make_id(.IRI, u64(len(d.iris)))
 		owned := intern_string(d, string(v))
 		append(&d.iris, owned)
 		d.iri_ids[owned] = id
@@ -116,7 +130,7 @@ intern_term :: proc(d: ^Dictionary, term: rdf.Term) -> Term_ID {
 			return id
 		}
 		check_capacity(len(d.blanks))
-		id := make_id(.Blank_Node, u64(len(d.blanks)))
+		id := store.make_id(.Blank_Node, u64(len(d.blanks)))
 		owned := intern_string(d, string(v))
 		append(&d.blanks, owned)
 		d.blank_ids[owned] = id
@@ -127,7 +141,7 @@ intern_term :: proc(d: ^Dictionary, term: rdf.Term) -> Term_ID {
 			return id
 		}
 		check_capacity(len(d.literals))
-		id := make_id(.Literal, u64(len(d.literals)))
+		id := store.make_id(.Literal, u64(len(d.literals)))
 		owned := rdf.Literal {
 			lexical   = intern_string(d, v.lexical),
 			datatype  = rdf.IRI(intern_string(d, string(v.datatype))),
@@ -142,7 +156,7 @@ intern_term :: proc(d: ^Dictionary, term: rdf.Term) -> Term_ID {
 		assert(v != nil, "intern_term: nil triple term")
 		return intern_triple_ids(
 			d,
-			[3]Term_ID {
+			[3]store.Term_ID {
 				intern_term(d, v.subject),
 				intern_term(d, v.predicate),
 				intern_term(d, v.object),
@@ -155,12 +169,12 @@ intern_term :: proc(d: ^Dictionary, term: rdf.Term) -> Term_ID {
 // intern_triple_ids interns the RDF-star triple term whose components
 // are the given already-interned IDs — the entry point for callers
 // that map components themselves (e.g. blank-node scoping on ingest).
-intern_triple_ids :: proc(d: ^Dictionary, components: [3]Term_ID) -> Term_ID {
+intern_triple_ids :: proc(d: ^Dictionary, components: [3]store.Term_ID) -> store.Term_ID {
 	if id, ok := d.triple_ids[components]; ok {
 		return id
 	}
 	check_capacity(len(d.triples))
-	id := make_id(.Triple, u64(len(d.triples)))
+	id := store.make_id(.Triple, u64(len(d.triples)))
 	node := new(rdf.Triple, d.allocator)
 	node^ = rdf.Triple {
 		subject   = lookup_term(d, components[0]),
@@ -177,14 +191,14 @@ intern_triple_ids :: proc(d: ^Dictionary, components: [3]Term_ID) -> Term_ID {
 // existing term, under a generated label ("b0", "b1", ...) skipping any
 // label already taken. Used by the load procedures to give each load
 // its own blank-node scope.
-fresh_blank :: proc(d: ^Dictionary) -> Term_ID {
+fresh_blank :: proc(d: ^Dictionary) -> store.Term_ID {
 	n := len(d.blanks)
 	label_buf: [24]u8
 	for {
 		label := format_blank_label(label_buf[:], n)
 		if label not_in d.blank_ids {
 			check_capacity(len(d.blanks))
-			id := make_id(.Blank_Node, u64(len(d.blanks)))
+			id := store.make_id(.Blank_Node, u64(len(d.blanks)))
 			owned := intern_string(d, label)
 			append(&d.blanks, owned)
 			d.blank_ids[owned] = id
@@ -214,24 +228,24 @@ format_blank_label :: proc(buf: []u8, n: int) -> string {
 }
 
 // intern_graph_label returns the ID for a quad's graph position: the
-// interned label, or DEFAULT_GRAPH for a nil label.
-intern_graph_label :: proc(d: ^Dictionary, g: rdf.Graph_Label) -> Term_ID {
+// interned label, or store.DEFAULT_GRAPH for a nil label.
+intern_graph_label :: proc(d: ^Dictionary, g: rdf.Graph_Label) -> store.Term_ID {
 	switch v in g {
 	case rdf.IRI:
 		return intern_term(d, v)
 	case rdf.Blank_Node:
 		return intern_term(d, v)
 	}
-	return DEFAULT_GRAPH
+	return store.DEFAULT_GRAPH
 }
 
 // lookup_term returns the term an ID was assigned to. The term's
 // strings are borrowed from dictionary storage, valid until
 // dictionary_destroy. The ID must have been produced by this
 // dictionary; sentinel and unknown IDs assert.
-lookup_term :: proc(d: ^Dictionary, id: Term_ID) -> rdf.Term {
-	counter := id_counter(id)
-	#partial switch id_kind(id) {
+lookup_term :: proc(d: ^Dictionary, id: store.Term_ID) -> rdf.Term {
+	counter := store.id_counter(id)
+	#partial switch store.id_kind(id) {
 	case .IRI:
 		return rdf.IRI(d.iris[counter])
 	case .Blank_Node:
@@ -245,13 +259,13 @@ lookup_term :: proc(d: ^Dictionary, id: Term_ID) -> rdf.Term {
 }
 
 // lookup_graph_label is lookup_term for the graph position:
-// DEFAULT_GRAPH maps back to the nil label.
-lookup_graph_label :: proc(d: ^Dictionary, id: Term_ID) -> rdf.Graph_Label {
-	if id == DEFAULT_GRAPH {
+// store.DEFAULT_GRAPH maps back to the nil label.
+lookup_graph_label :: proc(d: ^Dictionary, id: store.Term_ID) -> rdf.Graph_Label {
+	if id == store.DEFAULT_GRAPH {
 		return nil
 	}
-	counter := id_counter(id)
-	#partial switch id_kind(id) {
+	counter := store.id_counter(id)
+	#partial switch store.id_kind(id) {
 	case .IRI:
 		return rdf.IRI(d.iris[counter])
 	case .Blank_Node:
@@ -261,8 +275,8 @@ lookup_graph_label :: proc(d: ^Dictionary, id: Term_ID) -> rdf.Graph_Label {
 }
 
 // encode_quad interns all four positions of a quad.
-encode_quad :: proc(d: ^Dictionary, q: rdf.Quad) -> Encoded_Quad {
-	return Encoded_Quad {
+encode_quad :: proc(d: ^Dictionary, q: rdf.Quad) -> store.Encoded_Quad {
+	return store.Encoded_Quad {
 		intern_term(d, q.subject),
 		intern_term(d, q.predicate),
 		intern_term(d, q.object),
@@ -272,13 +286,13 @@ encode_quad :: proc(d: ^Dictionary, q: rdf.Quad) -> Encoded_Quad {
 
 // decode_quad materializes an encoded quad; term strings are borrowed
 // from dictionary storage (see lookup_term).
-decode_quad :: proc(d: ^Dictionary, q: Encoded_Quad) -> rdf.Quad {
+decode_quad :: proc(d: ^Dictionary, q: store.Encoded_Quad) -> rdf.Quad {
 	return rdf.Quad {
 		triple = rdf.Triple {
-			subject   = lookup_term(d, q[QUAD_S]),
-			predicate = lookup_term(d, q[QUAD_P]),
-			object    = lookup_term(d, q[QUAD_O]),
+			subject   = lookup_term(d, q[store.QUAD_S]),
+			predicate = lookup_term(d, q[store.QUAD_P]),
+			object    = lookup_term(d, q[store.QUAD_O]),
 		},
-		graph = lookup_graph_label(d, q[QUAD_G]),
+		graph = lookup_graph_label(d, q[store.QUAD_G]),
 	}
 }

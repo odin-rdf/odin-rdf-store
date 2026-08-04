@@ -4,14 +4,14 @@ level: initiative
 title: "LMDB-backed persistent dataset behind the match interface"
 short_code: "STORE-I-0002"
 created_at: 2026-08-04T20:32:36.970667+00:00
-updated_at: 2026-08-04T21:11:07.410821+00:00
+updated_at: 2026-08-04T21:24:18.687169+00:00
 parent: STORE-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/decompose"
+  - "#phase/active"
 
 
 exit_criteria_met: false
@@ -117,13 +117,15 @@ Direction (decomposition happens at the decompose phase, with human sign-off):
 
 ## Status Updates
 
+- **2026-08-04 — All 6 tasks completed.** The LMDB backend exists: `vendor/lmdb/` (pinned binding + provenance note), `store_lmdb/` (env/meta with loud format+width rejection, persistent dictionary with hashed+verified term2id, cursor-backed match over three index DBs, atomic batched loaders), and `conformance/` (the contract extracted into a shared harness — restructured as its own package because Odin's import rules forbid the original thin-wrapper-in-store plan; coverage inventory unchanged, recorded in T8). **The shared conformance suite passes verbatim over a database file at both Term_ID widths** — "multiple backends of one interface" is now demonstrated, not asserted. Full suite: 55 tests per width (21 store + 9 conformance + 25 store_lmdb), all green.
+- **Benchmark baselines (2026-08-04, Apple Silicon macOS, `odin run bench -o:speed`, 200k statements):** LMDB bulk load 64-bit — N-Triples 313 kstmt/s @ 310 B/stmt disk (no_sync 322 — nearly identical because one document = one txn = one fsync; the durable/no_sync gap will appear with many small documents); Turtle (probe-heavy, prices the ADR's verification read) 297 kstmt/s. 32-bit: 346 kstmt/s @ 216 B/stmt disk. Match path (no materialization): LMDB full scan 94–103 Mquad/s vs in-memory 807–989 Mquad/s; (g,s)-bound probes 444–448 kprobe/s including a read txn + cursor open per probe (~2.2 µs each — matches the decision-3 SPARQL analysis) vs 3.2–3.4 Mprobe/s in-memory. Verdict: verification reads and cursor overhead are visible but far from dominating; no ADR review trigger fires. In-memory load baselines unchanged from STORE-I-0001.
 - **2026-08-04 — Design complete, decomposed into 6 tasks.** All seven design decisions settled with the human; persistent format pinned in STORE-A-0003 (decided). Tasks: STORE-T-0007 (vendor binding + env/meta skeleton) ∥ STORE-T-0008 (shared conformance harness extraction) → STORE-T-0009 (persistent dictionary; after T7) → STORE-T-0010 (index DBs + cursor match, conformance green — the headline milestone; after T8+T9) → STORE-T-0011 (batched bulk load + persistence tests) → STORE-T-0012 (benchmarks, docs, close-out). Dependencies recorded in each task's `blocked_by` frontmatter. Awaiting human review before activation.
 
 ## Exit Criteria **[REQUIRED]**
 
-- [ ] The STORE-I-0001 conformance suite passes against the LMDB backend (all 16 patterns, set semantics, graph/term edge cases) at both Term_ID widths.
-- [ ] A database written, closed, and reopened yields identical counts, matches, and stable Term_IDs; opening under the other Term_ID width or an unknown format version fails loudly at open time.
-- [ ] Match iterators stream via LMDB cursors with zero-copy values, with the transaction-lifetime contract documented and tested; `match_destroy` releases cursor/txn resources.
-- [ ] All four parser formats bulk-load into the persistent store with batched write transactions and per-load blank-node scoping, verified on a reopened database.
-- [ ] The persistent format ADR is decided (DB layout, term serialization, meta schema, width/format rules).
-- [ ] Benchmarks record LMDB bulk-load and match numbers alongside the in-memory baselines; the core `store` package still builds with no C dependencies.
+- [x] The STORE-I-0001 conformance suite passes against the LMDB backend (all 16 patterns, set semantics, graph/term edge cases) at both Term_ID widths.
+- [x] A database written, closed, and reopened yields identical counts, matches, and stable Term_IDs; opening under the other Term_ID width or an unknown format version fails loudly at open time.
+- [x] Match iterators stream via LMDB cursors with zero-copy values, with the transaction-lifetime contract documented and tested; `match_destroy` releases cursor/txn resources.
+- [x] All four parser formats bulk-load into the persistent store with batched write transactions and per-load blank-node scoping, verified on a reopened database.
+- [x] The persistent format ADR is decided (DB layout, term serialization, meta schema, width/format rules).
+- [x] Benchmarks record LMDB bulk-load and match numbers alongside the in-memory baselines; the core `store` package still builds with no C dependencies (verified: `odin check store -no-entry-point` links nothing).

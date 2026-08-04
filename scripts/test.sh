@@ -5,8 +5,10 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-echo "== tests: Term_ID 64-bit (default) =="
-odin test store
-
-echo "== tests: Term_ID 32-bit =="
-odin test store -define:RDF_STORE_TERM_ID_BITS=32
+for width in 64 32; do
+	echo "== Term_ID $width-bit =="
+	for pkg in store store/memstore conformance store/kvstore; do
+		echo "-- $pkg --"
+		odin test "$pkg" -define:RDF_STORE_TERM_ID_BITS=$width
+	done
+done

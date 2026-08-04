@@ -1,32 +1,19 @@
-// Package store provides the odin-rdf-store storage core: a term
-// dictionary interning RDF terms to fixed-size IDs, an in-memory quad
-// dataset behind the match interface downstream engines consume, and
-// bulk ingestion from the odin-rdf-parser formats.
+// Package store is the shared vocabulary of the odin-rdf-store family:
+// the Term_ID encoding, the encoded-quad and match-pattern types, and
+// the match interface contract (interface.odin) that every backend
+// implements. It contains no storage itself — the backends live in the
+// subdirectory packages, as peers of one interface:
 //
-// The pieces and how they stack:
+//   - store/memstore — the in-memory reference backend: dictionary,
+//     permutation-indexed dataset, bulk loaders. No dependencies.
+//   - store/kvstore  — the persistent backend over LMDB: the same
+//     procedure set and semantics, durable on disk (ADR STORE-A-0003).
 //
-//   - Dictionary (dictionary.odin) interns rdf.Term values to Term_IDs
-//     and looks them back up; encode_quad/decode_quad translate whole
-//     quads. Interning clones borrowed strings, so parser output can be
-//     interned statement by statement (ADR RDF-A-0001).
-//   - Dataset (dataset.odin) stores encoded quads with set semantics —
-//     one default graph plus named graphs — and answers
-//     match(s, p, o, g) patterns with per-position wildcards through
-//     streaming iterators. The procedure set and its semantics are the
-//     match interface contract (ADR STORE-A-0002) that later backends
-//     (LMDB) implement identically; see the contract comment in
-//     dataset.odin. The dataset is append-only in v1: remove is
-//     specified (logical visibility) but not yet provided.
-//   - load_triples/load_quads/load_turtle/load_trig (load.odin) bulk-
-//     load documents via the parsers' pull loops, giving each load its
-//     own blank-node scope.
-//
-// Lifetime rules: terms returned by lookup_term/decode_quad borrow
-// their strings from dictionary storage and stay valid until
-// dictionary_destroy — no other operation invalidates them. Iterators
-// are valid until their dataset is mutated or destroyed. Every *_init
-// takes `allocator := context.allocator` and owns what it allocates
-// until the matching *_destroy.
+// The conformance package is the executable form of the contract; both
+// backends instantiate it, and a new backend proves itself by doing
+// the same. Downstream engines (odin-rdf-sparql, odin-rdf-shacl)
+// import this package for the vocabulary plus whichever backend the
+// caller picks.
 //
 // Term_ID encoding (ADR STORE-A-0001): a Term_ID is a fixed-width
 // unsigned integer whose top TAG_BITS bits carry the term kind and

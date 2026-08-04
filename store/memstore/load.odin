@@ -1,12 +1,14 @@
-package store
+package memstore
+
+import store ".."
 
 import "base:runtime"
 import "core:strings"
-import rdf "../../odin-rdf-parser/rdf"
-import quads_fmt "../../odin-rdf-parser/rdf/quads"
-import trig_fmt "../../odin-rdf-parser/rdf/trig"
-import triples_fmt "../../odin-rdf-parser/rdf/triples"
-import turtle_fmt "../../odin-rdf-parser/rdf/turtle"
+import rdf "../../../odin-rdf-parser/rdf"
+import quads_fmt "../../../odin-rdf-parser/rdf/quads"
+import trig_fmt "../../../odin-rdf-parser/rdf/trig"
+import triples_fmt "../../../odin-rdf-parser/rdf/triples"
+import turtle_fmt "../../../odin-rdf-parser/rdf/turtle"
 
 // Bulk ingestion from the odin-rdf-parser formats: a pull loop that
 // interns each statement's terms and inserts the encoded quad, one
@@ -25,15 +27,6 @@ import turtle_fmt "../../odin-rdf-parser/rdf/turtle"
 // statements already inserted remain (the store is append-only — there
 // is no rollback), and the returned count says how many.
 
-// Load_Error reports a failed load. message is "" on success, otherwise
-// a static description (the parser's spec-referencing error text) with
-// the 1-based source position.
-Load_Error :: struct {
-	message: string,
-	line:    int,
-	column:  int,
-}
-
 // load_triples ingests an N-Triples document into a graph of the
 // dataset (default graph unless a target graph label is given).
 // Returns the number of quads newly added — duplicates of quads
@@ -46,7 +39,7 @@ load_triples :: proc(
 	allocator := context.allocator,
 ) -> (
 	added: int,
-	err: Load_Error,
+	err: store.Load_Error,
 ) {
 	scope: Load_Scope
 	load_scope_init(&scope, d, ds, allocator)
@@ -73,7 +66,7 @@ load_turtle :: proc(
 	allocator := context.allocator,
 ) -> (
 	added: int,
-	err: Load_Error,
+	err: store.Load_Error,
 ) {
 	scope: Load_Scope
 	load_scope_init(&scope, d, ds, allocator)
@@ -98,7 +91,7 @@ load_quads :: proc(
 	allocator := context.allocator,
 ) -> (
 	added: int,
-	err: Load_Error,
+	err: store.Load_Error,
 ) {
 	scope: Load_Scope
 	load_scope_init(&scope, d, ds, allocator)
@@ -123,7 +116,7 @@ load_trig :: proc(
 	allocator := context.allocator,
 ) -> (
 	added: int,
-	err: Load_Error,
+	err: store.Load_Error,
 ) {
 	scope: Load_Scope
 	load_scope_init(&scope, d, ds, allocator)
@@ -139,11 +132,11 @@ load_trig :: proc(
 }
 
 @(private)
-load_error :: proc(failed: bool, message: string, line, column: int) -> Load_Error {
+load_error :: proc(failed: bool, message: string, line, column: int) -> store.Load_Error {
 	if !failed {
 		return {}
 	}
-	return Load_Error{message = message, line = line, column = column}
+	return store.Load_Error{message = message, line = line, column = column}
 }
 
 // Load_Scope is one load's blank-node scope: original label (cloned,
@@ -153,7 +146,7 @@ Load_Scope :: struct {
 	d:         ^Dictionary,
 	ds:        ^Dataset,
 	allocator: runtime.Allocator,
-	blanks:    map[string]Term_ID,
+	blanks:    map[string]store.Term_ID,
 	added:     int,
 }
 
@@ -162,7 +155,7 @@ load_scope_init :: proc(s: ^Load_Scope, d: ^Dictionary, ds: ^Dataset, allocator:
 	s.d = d
 	s.ds = ds
 	s.allocator = allocator
-	s.blanks = make(map[string]Term_ID, 8, allocator)
+	s.blanks = make(map[string]store.Term_ID, 8, allocator)
 	s.added = 0
 }
 
@@ -176,7 +169,7 @@ load_scope_destroy :: proc(s: ^Load_Scope) {
 }
 
 @(private)
-scope_blank :: proc(s: ^Load_Scope, label: string) -> Term_ID {
+scope_blank :: proc(s: ^Load_Scope, label: string) -> store.Term_ID {
 	if id, ok := s.blanks[label]; ok {
 		return id
 	}
@@ -191,7 +184,7 @@ scope_blank :: proc(s: ^Load_Scope, label: string) -> Term_ID {
 // applied, recursing into RDF-star triple terms so blank nodes inside
 // them are scoped too.
 @(private)
-scope_term :: proc(s: ^Load_Scope, term: rdf.Term) -> Term_ID {
+scope_term :: proc(s: ^Load_Scope, term: rdf.Term) -> store.Term_ID {
 	switch v in term {
 	case rdf.IRI, rdf.Literal:
 		return intern_term(s.d, term)
@@ -201,7 +194,7 @@ scope_term :: proc(s: ^Load_Scope, term: rdf.Term) -> Term_ID {
 		assert(v != nil, "scope_term: nil triple term")
 		return intern_triple_ids(
 			s.d,
-			[3]Term_ID {
+			[3]store.Term_ID {
 				scope_term(s, v.subject),
 				scope_term(s, v.predicate),
 				scope_term(s, v.object),
@@ -212,8 +205,8 @@ scope_term :: proc(s: ^Load_Scope, term: rdf.Term) -> Term_ID {
 }
 
 @(private)
-scope_insert_triple :: proc(s: ^Load_Scope, t: rdf.Triple, target: Term_ID) {
-	q := Encoded_Quad {
+scope_insert_triple :: proc(s: ^Load_Scope, t: rdf.Triple, target: store.Term_ID) {
+	q := store.Encoded_Quad {
 		scope_term(s, t.subject),
 		scope_term(s, t.predicate),
 		scope_term(s, t.object),
@@ -226,16 +219,16 @@ scope_insert_triple :: proc(s: ^Load_Scope, t: rdf.Triple, target: Term_ID) {
 
 @(private)
 scope_insert_quad :: proc(s: ^Load_Scope, q: rdf.Quad) {
-	graph: Term_ID
+	graph: store.Term_ID
 	switch v in q.graph {
 	case rdf.IRI:
 		graph = intern_term(s.d, v)
 	case rdf.Blank_Node:
 		graph = scope_blank(s, string(v))
 	case:
-		graph = DEFAULT_GRAPH
+		graph = store.DEFAULT_GRAPH
 	}
-	encoded := Encoded_Quad {
+	encoded := store.Encoded_Quad {
 		scope_term(s, q.subject),
 		scope_term(s, q.predicate),
 		scope_term(s, q.object),

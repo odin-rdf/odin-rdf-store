@@ -16,6 +16,7 @@ import "core:time"
 
 import corpus "../../odin-rdf-parser/bench/corpus"
 import store "../store"
+import memstore "../store/memstore"
 
 STATEMENTS :: 200_000
 
@@ -38,30 +39,32 @@ main :: proc() {
 	bench_load("N-Quads load", src_nq, load_nq)
 	bench_load("Turtle load", src_ttl, load_ttl)
 	bench_load("TriG load", src_trig, load_trig)
+
+	bench_lmdb()
 }
 
-Load_Proc :: proc(d: ^store.Dictionary, ds: ^store.Dataset, source: []byte) -> int
+Load_Proc :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int
 
-load_nt :: proc(d: ^store.Dictionary, ds: ^store.Dataset, source: []byte) -> int {
-	added, err := store.load_triples(d, ds, source)
+load_nt :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int {
+	added, err := memstore.load_triples(d, ds, source)
 	assert(err.message == "")
 	return added
 }
 
-load_nq :: proc(d: ^store.Dictionary, ds: ^store.Dataset, source: []byte) -> int {
-	added, err := store.load_quads(d, ds, source)
+load_nq :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int {
+	added, err := memstore.load_quads(d, ds, source)
 	assert(err.message == "")
 	return added
 }
 
-load_ttl :: proc(d: ^store.Dictionary, ds: ^store.Dataset, source: []byte) -> int {
-	added, err := store.load_turtle(d, ds, source)
+load_ttl :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int {
+	added, err := memstore.load_turtle(d, ds, source)
 	assert(err.message == "")
 	return added
 }
 
-load_trig :: proc(d: ^store.Dictionary, ds: ^store.Dataset, source: []byte) -> int {
-	added, err := store.load_trig(d, ds, source)
+load_trig :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int {
+	added, err := memstore.load_trig(d, ds, source)
 	assert(err.message == "")
 	return added
 }
@@ -72,18 +75,18 @@ bench_load :: proc(label: string, src: string, load: Load_Proc) {
 	defer mem.tracking_allocator_destroy(&tracker)
 	allocator := mem.tracking_allocator(&tracker)
 
-	d: store.Dictionary
-	store.dictionary_init(&d, allocator)
-	ds: store.Dataset
-	store.dataset_init(&ds, allocator)
+	d: memstore.Dictionary
+	memstore.dictionary_init(&d, allocator)
+	ds: memstore.Dataset
+	memstore.dataset_init(&ds, allocator)
 
 	start := time.tick_now()
 	added := load(&d, &ds, transmute([]u8)src)
 	// First match builds the indexes (lazy flush) — include it in the
 	// timing so the number is load + index construction, not just parse
 	// + intern.
-	it := store.match(&ds, store.MATCH_ALL)
-	store.match_destroy(&it)
+	it := memstore.match(&ds, store.MATCH_ALL)
+	memstore.match_destroy(&it)
 	elapsed := time.tick_since(start)
 
 	seconds := time.duration_seconds(elapsed)
@@ -98,6 +101,6 @@ bench_load :: proc(label: string, src: string, load: Load_Proc) {
 		added,
 	)
 
-	store.dataset_destroy(&ds)
-	store.dictionary_destroy(&d)
+	memstore.dataset_destroy(&ds)
+	memstore.dictionary_destroy(&d)
 }

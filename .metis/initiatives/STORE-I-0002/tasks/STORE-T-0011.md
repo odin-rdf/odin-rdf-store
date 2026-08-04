@@ -4,14 +4,14 @@ level: task
 title: "Batched bulk load and persistence tests for the LMDB backend"
 short_code: "STORE-T-0011"
 created_at: 2026-08-04T21:11:38.240815+00:00
-updated_at: 2026-08-04T21:11:38.240815+00:00
+updated_at: 2026-08-04T21:40:33.771293+00:00
 parent: STORE-I-0002
-blocked_by: ["STORE-T-0010"]
+blocked_by: [STORE-T-0010]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -28,14 +28,18 @@ initiative_id: STORE-I-0002
 
 Bulk-load all four parser formats into the persistent store — one write transaction per document (initiative decision 2) — and prove persistence end to end: blank scoping across loads and reopens, adversarial borrow discipline, and the close/reopen round-trip.
 
+## Acceptance Criteria
+
+## Acceptance Criteria
+
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] `load_triples`/`load_quads`/`load_turtle`/`load_trig` for the LMDB backend, driving the parsers' pull loops with per-load blank-node scoping (via the STORE-T-0009 `fresh_blank`), each document inside a single write transaction.
-- [ ] Error semantics documented and tested: a parse error aborts the transaction, so an LMDB load is **atomic per document** — nothing persists from a failed load. This is a deliberate, documented divergence from the in-memory loader's keep-partial behavior (loaders are package conveniences, not part of the shared contract; the txn makes better semantics free).
-- [ ] Blank scoping holds across sessions: the same blank-labeled document loaded before and after a close/reopen produces distinct blank nodes (persisted counters — no label reuse), while ground documents dedupe across reopens.
-- [ ] Adversarial fixtures (escapes, non-ASCII IRIs, prefixed names, RDF-star) loaded from a buffer that is overwritten after the load; a reopened database still yields the original content — the persistent form of the RDF-A-0001 proof.
-- [ ] Round-trip: load → close → reopen → export through the parser emitters → reload into a fresh store → same quad set modulo blank relabeling (greedy-bijection comparator, shared from STORE-T-0008's extraction or reused by copy per its recorded decision).
-- [ ] Counts and spot matches verified through the match interface on the reopened database; all tests green at both Term_ID widths.
+- [x] `load_triples`/`load_quads`/`load_turtle`/`load_trig` for the LMDB backend, driving the parsers' pull loops with per-load blank-node scoping (via the STORE-T-0009 `fresh_blank`), each document inside a single write transaction.
+- [x] Error semantics documented and tested: a parse error aborts the transaction, so an LMDB load is **atomic per document** — nothing persists from a failed load. This is a deliberate, documented divergence from the in-memory loader's keep-partial behavior (loaders are package conveniences, not part of the shared contract; the txn makes better semantics free).
+- [x] Blank scoping holds across sessions: the same blank-labeled document loaded before and after a close/reopen produces distinct blank nodes (persisted counters — no label reuse), while ground documents dedupe across reopens.
+- [x] Adversarial fixtures (escapes, non-ASCII IRIs, prefixed names, RDF-star) loaded from a buffer that is overwritten after the load; a reopened database still yields the original content — the persistent form of the RDF-A-0001 proof.
+- [x] Round-trip: load → close → reopen → export through the parser emitters → reload into a fresh store → same quad set modulo blank relabeling (greedy-bijection comparator, shared from STORE-T-0008's extraction or reused by copy per its recorded decision).
+- [x] Counts and spot matches verified through the match interface on the reopened database; all tests green at both Term_ID widths.
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
 
@@ -50,4 +54,4 @@ Large documents in one txn grow the dirty-page set; fine at test scale, and `map
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+- **2026-08-04 — Completed.** `store_lmdb/load.odin`: four loaders driving the parsers' pull loops, each document in one write transaction with `Load_Scope` (cloned-label map → `fresh_blank_txn`, recursing through RDF-star triple terms and blank graph labels). Return shape separates the failure worlds: `(added, parse_err: store.Load_Error, err: Error)` — parse errors abort the txn (atomic per document, tested: failed load leaves count at 0), storage errors surface as `Error`. `intern_triple_ids_txn` extracted in the dictionary for the scoped triple-term path. Scoping/statement logic mirrors `store/load.odin` by knowing duplication (the txn plumbing and error model differ enough that extraction wasn't clean; recorded per T8's decision). 5 integration tests: four formats + spot matches, atomic-per-document, blank scoping across close/reopen (persisted counters — no label reuse), buffer-overwrite + reopen borrow proof, and the emit→reload round-trip across a reopen using the shared `conformance.quads_equal_mod_blanks`. Suite: 21+9+25 green at both widths.

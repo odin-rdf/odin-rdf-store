@@ -1,11 +1,13 @@
-package store
+package memstore
+
+import store ".."
 
 // White-box checks of the permutation-index internals — deliberately
 // separate from the implementation-agnostic conformance suite in
 // dataset_test.odin.
 
 import "core:testing"
-import rdf "../../odin-rdf-parser/rdf"
+import rdf "../../../odin-rdf-parser/rdf"
 
 @(test)
 test_indexes_stay_consistent :: proc(t: ^testing.T) {
@@ -19,7 +21,7 @@ test_indexes_stay_consistent :: proc(t: ^testing.T) {
 	// A grid of quads inserted in scrambled order, with duplicates.
 	subjects := [?]string{"s0", "s1", "s2"}
 	graphs := [?]rdf.Graph_Label{nil, rdf.IRI("http://example.org/g")}
-	quads := make([dynamic]Encoded_Quad)
+	quads := make([dynamic]store.Encoded_Quad)
 	defer delete(quads)
 	for s, si in subjects {
 		for g in graphs {
@@ -49,7 +51,7 @@ test_indexes_stay_consistent :: proc(t: ^testing.T) {
 
 	// ... each strictly sorted under its own permutation (strict:
 	// sorted and duplicate-free) ...
-	check_sorted :: proc(t: ^testing.T, quads: []Encoded_Quad, perm: [4]int) {
+	check_sorted :: proc(t: ^testing.T, quads: []store.Encoded_Quad, perm: [4]int) {
 		for i in 1 ..< len(quads) {
 			testing.expect(t, permuted_compare(quads[i-1], quads[i], perm) < 0)
 		}
@@ -59,7 +61,7 @@ test_indexes_stay_consistent :: proc(t: ^testing.T) {
 	check_sorted(t, ds.gosp[:], PERM_GOSP)
 
 	// ... and over the same quad set.
-	seen := make(map[Encoded_Quad]struct {})
+	seen := make(map[store.Encoded_Quad]struct {})
 	defer delete(seen)
 	for q in ds.gspo {
 		seen[q] = {}

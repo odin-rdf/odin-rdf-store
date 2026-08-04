@@ -1,8 +1,10 @@
-package store
+package memstore
+
+import store ".."
 
 import "core:strings"
 import "core:testing"
-import rdf "../../odin-rdf-parser/rdf"
+import rdf "../../../odin-rdf-parser/rdf"
 
 @(test)
 test_intern_twice_same_id :: proc(t: ^testing.T) {
@@ -11,15 +13,15 @@ test_intern_twice_same_id :: proc(t: ^testing.T) {
 	defer dictionary_destroy(&d)
 
 	iri := intern_term(&d, rdf.IRI("http://example.org/a"))
-	testing.expect_value(t, id_kind(iri), Term_Kind.IRI)
+	testing.expect_value(t, store.id_kind(iri), store.Term_Kind.IRI)
 	testing.expect_value(t, intern_term(&d, rdf.IRI("http://example.org/a")), iri)
 
 	blank := intern_term(&d, rdf.Blank_Node("b0"))
-	testing.expect_value(t, id_kind(blank), Term_Kind.Blank_Node)
+	testing.expect_value(t, store.id_kind(blank), store.Term_Kind.Blank_Node)
 	testing.expect_value(t, intern_term(&d, rdf.Blank_Node("b0")), blank)
 
 	lit := intern_term(&d, rdf.literal("hello"))
-	testing.expect_value(t, id_kind(lit), Term_Kind.Literal)
+	testing.expect_value(t, store.id_kind(lit), store.Term_Kind.Literal)
 	testing.expect_value(t, intern_term(&d, rdf.literal("hello")), lit)
 
 	tr := rdf.Triple {
@@ -28,7 +30,7 @@ test_intern_twice_same_id :: proc(t: ^testing.T) {
 		object    = rdf.literal("hello"),
 	}
 	triple_id := intern_term(&d, &tr)
-	testing.expect_value(t, id_kind(triple_id), Term_Kind.Triple)
+	testing.expect_value(t, store.id_kind(triple_id), store.Term_Kind.Triple)
 	tr2 := tr // same structure, distinct pointer
 	testing.expect_value(t, intern_term(&d, &tr2), triple_id)
 }
@@ -44,12 +46,12 @@ test_dense_counters_per_kind :: proc(t: ^testing.T) {
 	l := intern_term(&d, rdf.literal("x"))
 	c := intern_term(&d, rdf.IRI("http://example.org/c"))
 
-	testing.expect_value(t, id_counter(a), u64(0))
-	testing.expect_value(t, id_counter(b), u64(1))
-	testing.expect_value(t, id_counter(c), u64(2))
+	testing.expect_value(t, store.id_counter(a), u64(0))
+	testing.expect_value(t, store.id_counter(b), u64(1))
+	testing.expect_value(t, store.id_counter(c), u64(2))
 	// Kinds count independently: the literal did not consume an IRI
 	// counter.
-	testing.expect_value(t, id_counter(l), u64(0))
+	testing.expect_value(t, store.id_counter(l), u64(0))
 }
 
 @(test)
@@ -97,7 +99,7 @@ test_literal_distinctions :: proc(t: ^testing.T) {
 	directed := intern_term(&d, rdf.literal("chat", "fr", rdf.Direction.LTR))
 	typed := intern_term(&d, rdf.literal_typed("chat", rdf.IRI("http://example.org/dt")))
 
-	ids := [?]Term_ID{plain, tagged_en, tagged_fr, directed, typed}
+	ids := [?]store.Term_ID{plain, tagged_en, tagged_fr, directed, typed}
 	for x, i in ids {
 		for y in ids[i + 1:] {
 			testing.expect(t, x != y)
@@ -147,11 +149,11 @@ test_graph_labels :: proc(t: ^testing.T) {
 	dictionary_init(&d)
 	defer dictionary_destroy(&d)
 
-	testing.expect_value(t, intern_graph_label(&d, nil), DEFAULT_GRAPH)
-	testing.expect(t, lookup_graph_label(&d, DEFAULT_GRAPH) == nil)
+	testing.expect_value(t, intern_graph_label(&d, nil), store.DEFAULT_GRAPH)
+	testing.expect(t, lookup_graph_label(&d, store.DEFAULT_GRAPH) == nil)
 
 	g := intern_graph_label(&d, rdf.IRI("http://example.org/g"))
-	testing.expect_value(t, id_kind(g), Term_Kind.IRI)
+	testing.expect_value(t, store.id_kind(g), store.Term_Kind.IRI)
 	testing.expect(
 		t,
 		rdf.equal(lookup_graph_label(&d, g), rdf.Graph_Label(rdf.IRI("http://example.org/g"))),
@@ -184,7 +186,7 @@ test_encode_decode_quad :: proc(t: ^testing.T) {
 	q_default.graph = nil
 	encoded_default := encode_quad(&d, q_default)
 	testing.expect(t, encoded != encoded_default)
-	testing.expect_value(t, encoded_default[QUAD_G], DEFAULT_GRAPH)
+	testing.expect_value(t, encoded_default[store.QUAD_G], store.DEFAULT_GRAPH)
 	testing.expect(t, rdf.equal(decode_quad(&d, encoded_default), q_default))
 }
 
