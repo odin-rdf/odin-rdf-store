@@ -4,14 +4,14 @@ level: initiative
 title: "LMDB-backed persistent dataset behind the match interface"
 short_code: "STORE-I-0002"
 created_at: 2026-08-04T20:32:36.970667+00:00
-updated_at: 2026-08-04T21:24:18.687169+00:00
+updated_at: 2026-08-04T22:01:50.387612+00:00
 parent: STORE-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
