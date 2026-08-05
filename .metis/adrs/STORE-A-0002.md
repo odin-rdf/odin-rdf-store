@@ -83,3 +83,21 @@ The match interface is a **documented procedure-set convention enforced by a sha
 - odin-rdf-sparql's basic graph pattern evaluation lands and demonstrates needs the convention cannot absorb (the vision's budgeted revision point).
 - A consumer demonstrates a concrete need for runtime backend polymorphism — triggers designing the vtable adapter, not revisiting the convention.
 - The LMDB backend begins and reveals a contract ambiguity the conformance suite did not pin down.
+
+### Review Log
+
+- **2026-08-05 — Trigger 1 fired, and the review is filed rather than pending.** odin-rdf-sparql's evaluation engine is complete (SPARQL-I-0002): the full algebra, both backends, both Term_ID widths, the W3C SPARQL 1.1 and 1.2 evaluation suites green. It bound to the procedure-set convention without an adapter and without a revision, which answers the trigger's first question — the convention absorbed a whole query engine.
+
+  What it *could not* absorb is filed as seven backlog items, each carrying the operator that wants it and what it would buy (odin-rdf-sparql SPARQL-T-0019):
+
+  | Item | Capability | Asked for by |
+  |---|---|---|
+  | STORE-T-0015 | Ordered match iteration, and range reads over it | MIN/MAX, ORDER BY, top-N, merge joins, streaming DISTINCT |
+  | STORE-T-0016 | The named-graph list, and the terms a graph holds | `GRAPH ?g {}`, both-endpoints-free property paths |
+  | STORE-T-0017 | A named-graph wildcard in the graph position | every `GRAPH ?g { … }` |
+  | STORE-T-0018 | Cardinality estimates for a pattern | the planner seam, built and empty |
+  | STORE-T-0019 | Snapshot reads: one query, one dataset | every query, under any concurrent writer |
+  | STORE-T-0020 | `triple_parts`: a triple term's component IDs | SPARQL 1.2 triple-term patterns |
+  | STORE-T-0021 | Reserving the Sentinel counters above UNBOUND | the engine's query-local term names |
+
+  None of the seven is a change to the *convention* — every one extends the procedure set, which is what this ADR's Consequences already anticipated ("the expected interface revision … will extend the procedure set; the conformance suite grows with it"). The decision stands; the trigger is discharged.
