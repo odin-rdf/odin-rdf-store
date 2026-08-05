@@ -3,7 +3,7 @@ package memstore
 import store ".."
 
 import "core:testing"
-import rdf "../../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 
 @(private = "file")
 EX :: "http://example.org/"

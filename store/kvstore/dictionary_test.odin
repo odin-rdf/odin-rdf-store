@@ -5,7 +5,7 @@ import "core:mem"
 import "core:strings"
 import "core:testing"
 
-import rdf "../../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 import lmdb "../../vendor/lmdb"
 import store ".."
 

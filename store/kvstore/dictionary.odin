@@ -5,7 +5,7 @@ import "core:encoding/endian"
 import "core:hash/xxhash"
 import "core:strings"
 
-import rdf "../../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 import lmdb "../../vendor/lmdb"
 import store ".."
 

@@ -2,7 +2,7 @@ package conformance
 
 import "core:testing"
 
-import rdf "../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 
 // blank_label extracts the label when the term is a blank node.
 @(private)

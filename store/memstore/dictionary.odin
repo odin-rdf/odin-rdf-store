@@ -16,7 +16,7 @@ import store ".."
 
 import "base:runtime"
 import "core:strings"
-import rdf "../../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 
 // Dictionary interns RDF terms to Term_IDs and looks them back up.
 // Interning equal terms (per rdf.equal semantics) returns the same ID;

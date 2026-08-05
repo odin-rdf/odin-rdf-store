@@ -4,8 +4,8 @@ import "core:mem"
 import "core:strings"
 import "core:testing"
 
-import rdf "../../../odin-rdf-parser/rdf"
-import quads_fmt "../../../odin-rdf-parser/rdf/quads"
+import "rdf:rdf"
+import quads_fmt "rdf:rdf/quads"
 import "../../conformance"
 import store ".."
 

@@ -3,11 +3,11 @@ package kvstore
 import "base:runtime"
 import "core:strings"
 
-import rdf "../../../odin-rdf-parser/rdf"
-import quads_fmt "../../../odin-rdf-parser/rdf/quads"
-import trig_fmt "../../../odin-rdf-parser/rdf/trig"
-import triples_fmt "../../../odin-rdf-parser/rdf/triples"
-import turtle_fmt "../../../odin-rdf-parser/rdf/turtle"
+import "rdf:rdf"
+import quads_fmt "rdf:rdf/quads"
+import trig_fmt "rdf:rdf/trig"
+import triples_fmt "rdf:rdf/triples"
+import turtle_fmt "rdf:rdf/turtle"
 import lmdb "../../vendor/lmdb"
 import store ".."
 

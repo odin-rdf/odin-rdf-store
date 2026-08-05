@@ -4,7 +4,7 @@ import store ".."
 
 import "core:strings"
 import "core:testing"
-import rdf "../../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 
 @(test)
 test_intern_twice_same_id :: proc(t: ^testing.T) {

@@ -7,7 +7,7 @@ import store ".."
 // dataset_test.odin.
 
 import "core:testing"
-import rdf "../../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 
 @(test)
 test_indexes_stay_consistent :: proc(t: ^testing.T) {

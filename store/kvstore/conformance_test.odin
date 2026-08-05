@@ -7,7 +7,7 @@ package kvstore
 
 import "core:testing"
 
-import rdf "../../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 import "../../conformance"
 import store ".."
 

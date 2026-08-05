@@ -8,7 +8,7 @@ import "core:fmt"
 import "core:os"
 import "core:time"
 
-import corpus "../../odin-rdf-parser/bench/corpus"
+import "rdf:bench/corpus"
 import store "../store"
 import memstore "../store/memstore"
 import kvstore "../store/kvstore"

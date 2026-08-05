@@ -14,7 +14,7 @@ package conformance
 
 import "core:testing"
 
-import rdf "../../odin-rdf-parser/rdf"
+import "rdf:rdf"
 import "../store"
 
 // Backend adapts one dataset implementation (plus the dictionary it
