@@ -164,6 +164,39 @@ test_graph_labels :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_find_term_is_pure_lookup :: proc(t: ^testing.T) {
+	// The conformance suite covers find_term's contract for both
+	// backends; this pins the in-memory dictionary's own bookkeeping —
+	// a miss must not touch the maps interning would have grown.
+	d: Dictionary
+	dictionary_init(&d)
+	defer dictionary_destroy(&d)
+
+	iri := intern_term(&d, rdf.IRI("http://example.org/a"))
+	found, ok := find_term(&d, rdf.IRI("http://example.org/a"))
+	testing.expect_value(t, ok, true)
+	testing.expect_value(t, found, iri)
+
+	// The kind is part of identity: the same spelling as a blank node is
+	// a different term, and absent.
+	_, blank_ok := find_term(&d, rdf.Blank_Node("http://example.org/a"))
+	testing.expect_value(t, blank_ok, false)
+
+	_, absent_ok := find_term(&d, rdf.IRI("http://example.org/b"))
+	testing.expect_value(t, absent_ok, false)
+	testing.expect_value(t, len(d.iris), 1)
+	testing.expect_value(t, len(d.iri_ids), 1)
+	testing.expect_value(t, len(d.blank_ids), 0)
+	// Not even the string table grew.
+	testing.expect_value(t, len(d.owned), 1)
+
+	// A second look still misses: the first did not quietly assign.
+	_, again_ok := find_term(&d, rdf.IRI("http://example.org/b"))
+	testing.expect_value(t, again_ok, false)
+	testing.expect_value(t, intern_term(&d, rdf.IRI("http://example.org/b")), store.make_id(.IRI, 1))
+}
+
+@(test)
 test_encode_decode_quad :: proc(t: ^testing.T) {
 	d: Dictionary
 	dictionary_init(&d)

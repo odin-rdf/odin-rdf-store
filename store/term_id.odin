@@ -42,9 +42,9 @@ when TERM_ID_BITS == 32 {
 
 // Term_Kind is the tag stored in a Term_ID's high bits. The four real
 // kinds mirror the variants of rdf.Term. The Sentinel tag carries
-// reserved IDs (DEFAULT_GRAPH, WILDCARD) that the dictionary never
-// assigns to a term; tag values above Sentinel are reserved for future
-// kinds.
+// reserved IDs (DEFAULT_GRAPH, WILDCARD, UNBOUND) that the dictionary
+// never assigns to a term; tag values above Sentinel are reserved for
+// future kinds.
 Term_Kind :: enum u8 {
 	IRI        = 0,
 	Blank_Node = 1,
@@ -72,6 +72,15 @@ DEFAULT_GRAPH :: Term_ID(Term_Kind.Sentinel) << COUNTER_BITS | 0
 // WILDCARD is the reserved ID standing, in a match pattern, for "any
 // term in this position". It never appears inside a stored quad.
 WILDCARD :: Term_ID(Term_Kind.Sentinel) << COUNTER_BITS | 1
+
+// UNBOUND is the reserved ID standing, in a solution row above the
+// store, for "this variable has no value here" — the sentinel a query
+// engine needs because ID 0 is a perfectly good term (the first IRI).
+// The store itself never produces or consumes it: like DEFAULT_GRAPH
+// and WILDCARD it is never assigned by a dictionary, and unlike them it
+// is valid in neither a stored quad nor a match pattern. It is reserved
+// here so no future sentinel takes counter 2 out from under a consumer.
+UNBOUND :: Term_ID(Term_Kind.Sentinel) << COUNTER_BITS | 2
 
 // make_id builds the ID of the counter-th term of a kind. Counters
 // beyond MAX_COUNTER cannot be represented; callers that assign

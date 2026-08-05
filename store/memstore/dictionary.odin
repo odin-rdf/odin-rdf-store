@@ -227,6 +227,43 @@ format_blank_label :: proc(buf: []u8, n: int) -> string {
 	return string(buf[:1 + count])
 }
 
+// find_term returns the ID a term already has, or found=false if the
+// dictionary has never seen it. Unlike intern_term it assigns nothing:
+// this is the query path's entry point, where resolving a constant that
+// happens to be absent must not grow the dictionary. A nil term is not
+// a valid RDF term and asserts.
+find_term :: proc(d: ^Dictionary, term: rdf.Term) -> (id: store.Term_ID, found: bool) {
+	switch v in term {
+	case rdf.IRI:
+		id, found = d.iri_ids[string(v)]
+		return
+
+	case rdf.Blank_Node:
+		id, found = d.blank_ids[string(v)]
+		return
+
+	case rdf.Literal:
+		id, found = d.literal_ids[v]
+		return
+
+	case ^rdf.Triple:
+		// Component-wise: a triple term whose parts are not all present
+		// cannot itself be present.
+		assert(v != nil, "find_term: nil triple term")
+		components: [3]store.Term_ID
+		for part, i in ([3]rdf.Term{v.subject, v.predicate, v.object}) {
+			component, ok := find_term(d, part)
+			if !ok {
+				return 0, false
+			}
+			components[i] = component
+		}
+		id, found = d.triple_ids[components]
+		return
+	}
+	panic("find_term: nil term")
+}
+
 // intern_graph_label returns the ID for a quad's graph position: the
 // interned label, or store.DEFAULT_GRAPH for a nil label.
 intern_graph_label :: proc(d: ^Dictionary, g: rdf.Graph_Label) -> store.Term_ID {
@@ -237,6 +274,18 @@ intern_graph_label :: proc(d: ^Dictionary, g: rdf.Graph_Label) -> store.Term_ID 
 		return intern_term(d, v)
 	}
 	return store.DEFAULT_GRAPH
+}
+
+// find_graph_label is find_term for the graph position: a nil label is
+// always found, as store.DEFAULT_GRAPH.
+find_graph_label :: proc(d: ^Dictionary, g: rdf.Graph_Label) -> (id: store.Term_ID, found: bool) {
+	switch v in g {
+	case rdf.IRI:
+		return find_term(d, v)
+	case rdf.Blank_Node:
+		return find_term(d, v)
+	}
+	return store.DEFAULT_GRAPH, true
 }
 
 // lookup_term returns the term an ID was assigned to. The term's

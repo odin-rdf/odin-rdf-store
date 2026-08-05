@@ -50,6 +50,16 @@ memstore_backend_init :: proc(m: ^Memstore_Backend) -> Backend {
 		intern_graph = proc(ctx: rawptr, g: rdf.Graph_Label) -> store.Term_ID {
 			return memstore.intern_graph_label(&(^Memstore_Backend)(ctx).d, g)
 		},
+		find_term = proc(ctx: rawptr, term: rdf.Term) -> (store.Term_ID, bool) {
+			return memstore.find_term(&(^Memstore_Backend)(ctx).d, term)
+		},
+		find_graph = proc(ctx: rawptr, g: rdf.Graph_Label) -> (store.Term_ID, bool) {
+			return memstore.find_graph_label(&(^Memstore_Backend)(ctx).d, g)
+		},
+		dict_size = proc(ctx: rawptr) -> int {
+			d := &(^Memstore_Backend)(ctx).d
+			return len(d.iris) + len(d.blanks) + len(d.literals) + len(d.triples)
+		},
 	}
 }
 
@@ -97,4 +107,12 @@ test_memstore_default_vs_named_graphs :: proc(t: ^testing.T) {
 	b := memstore_backend_init(&m)
 	defer memstore_backend_destroy(&m)
 	check_default_vs_named_graphs(t, &b)
+}
+
+@(test)
+test_memstore_find_term :: proc(t: ^testing.T) {
+	m: Memstore_Backend
+	b := memstore_backend_init(&m)
+	defer memstore_backend_destroy(&m)
+	check_find_term(t, &b)
 }

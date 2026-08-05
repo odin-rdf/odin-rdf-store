@@ -65,6 +65,24 @@ lmdb_backend_init :: proc(m: ^Lmdb_Backend, name: string) -> conformance.Backend
 			assert(err == nil)
 			return id
 		},
+		find_term = proc(ctx: rawptr, term: rdf.Term) -> (store.Term_ID, bool) {
+			id, found, err := find_term((^Lmdb_Backend)(ctx).s, term)
+			assert(err == nil)
+			return id, found
+		},
+		find_graph = proc(ctx: rawptr, g: rdf.Graph_Label) -> (store.Term_ID, bool) {
+			id, found, err := find_graph_label((^Lmdb_Backend)(ctx).s, g)
+			assert(err == nil)
+			return id, found
+		},
+		dict_size = proc(ctx: rawptr) -> int {
+			// The per-kind counters are the persisted dictionary size.
+			total := 0
+			for next in (^Lmdb_Backend)(ctx).s.next {
+				total += int(next)
+			}
+			return total
+		},
 	}
 }
 
@@ -112,6 +130,14 @@ test_lmdb_default_vs_named_graphs :: proc(t: ^testing.T) {
 	b := lmdb_backend_init(&m, "conf-graphs")
 	defer lmdb_backend_destroy(&m)
 	conformance.check_default_vs_named_graphs(t, &b)
+}
+
+@(test)
+test_lmdb_find_term :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m, "conf-find")
+	defer lmdb_backend_destroy(&m)
+	conformance.check_find_term(t, &b)
 }
 
 // White-box checks beyond the shared suite: exact index-key bytes and

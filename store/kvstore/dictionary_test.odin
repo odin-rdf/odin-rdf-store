@@ -280,6 +280,100 @@ test_dict_graph_labels_and_quads :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_dict_find_term_read_only_environment :: proc(t: ^testing.T) {
+	// The point of find_term for this backend: a query resolving its
+	// ground terms opens no write transaction, so it works against an
+	// environment opened read-only — where interning cannot even be
+	// attempted.
+	path := test_db_path("dict-find-ro")
+	defer remove_test_db(path)
+
+	s, err := open(path)
+	testing.expect(t, err == nil)
+	iri, _ := intern_term(s, rdf.IRI("http://example.org/a"))
+	lit, _ := intern_term(s, rdf.literal("chat", "fr"))
+	g, _ := intern_graph_label(s, rdf.IRI("http://example.org/g"))
+	counters := s.next
+	close(s)
+
+	opts := DEFAULT_OPTIONS
+	opts.read_only = true
+	ro, ro_err := open(path, opts)
+	testing.expect(t, ro_err == nil)
+	defer close(ro)
+
+	found_iri, iri_ok, ferr := find_term(ro, rdf.IRI("http://example.org/a"))
+	testing.expect(t, ferr == nil)
+	testing.expect_value(t, iri_ok, true)
+	testing.expect_value(t, found_iri, iri)
+
+	found_lit, lit_ok, _ := find_term(ro, rdf.literal("chat", "fr"))
+	testing.expect_value(t, lit_ok, true)
+	testing.expect_value(t, found_lit, lit)
+
+	found_g, g_ok, _ := find_graph_label(ro, rdf.IRI("http://example.org/g"))
+	testing.expect_value(t, g_ok, true)
+	testing.expect_value(t, found_g, g)
+
+	// An absent term reports not-found rather than failing the way a
+	// write into a read-only environment would.
+	_, absent_ok, aerr := find_term(ro, rdf.IRI("http://example.org/absent"))
+	testing.expect(t, aerr == nil)
+	testing.expect_value(t, absent_ok, false)
+
+	// Nothing was assigned along the way.
+	testing.expect_value(t, ro.next, counters)
+}
+
+@(test)
+test_dict_find_term_in_write_txn :: proc(t: ^testing.T) {
+	// find_term_txn is transaction-agnostic: inside a write transaction
+	// it sees that transaction's own uncommitted assignments, which is
+	// what a loader interleaving finds and interns needs.
+	path, s := with_store("dict-find-txn")
+	defer remove_test_db(path)
+	defer close(s)
+
+	txn: ^lmdb.Txn
+	testing.expect_value(t, lmdb.txn_begin(s.env, nil, 0, &txn), i32(lmdb.SUCCESS))
+
+	_, before, berr := find_term_txn(s, txn, rdf.IRI("http://example.org/a"))
+	testing.expect(t, berr == nil)
+	testing.expect_value(t, before, false)
+
+	interned, ierr := intern_term_txn(s, txn, rdf.IRI("http://example.org/a"))
+	testing.expect(t, ierr == nil)
+
+	id, after, aerr := find_term_txn(s, txn, rdf.IRI("http://example.org/a"))
+	testing.expect(t, aerr == nil)
+	testing.expect_value(t, after, true)
+	testing.expect_value(t, id, interned)
+
+	testing.expect_value(t, lmdb.txn_commit(txn), i32(lmdb.SUCCESS))
+}
+
+@(test)
+test_dict_find_term_long_language :: proc(t: ^testing.T) {
+	// Interning a literal whose language tag overflows the format's
+	// one-byte field is an error; finding one is simply not-found, since
+	// no stored literal can carry it.
+	path, s := with_store("dict-find-lang")
+	defer remove_test_db(path)
+	defer close(s)
+
+	long := strings.repeat("x", 256)
+	defer delete(long)
+	bad := rdf.Literal {
+		lexical  = "v",
+		datatype = rdf.RDF_LANG_STRING,
+		language = long,
+	}
+	_, found, err := find_term(s, bad)
+	testing.expect(t, err == nil)
+	testing.expect_value(t, found, false)
+}
+
+@(test)
 test_dict_fresh_blank :: proc(t: ^testing.T) {
 	path, s := with_store("dict-fresh")
 	defer remove_test_db(path)

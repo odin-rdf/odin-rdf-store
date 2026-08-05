@@ -28,12 +28,25 @@ test_sentinels :: proc(t: ^testing.T) {
 	testing.expect_value(t, id_counter(DEFAULT_GRAPH), u64(0))
 	testing.expect_value(t, id_kind(WILDCARD), Term_Kind.Sentinel)
 	testing.expect_value(t, id_counter(WILDCARD), u64(1))
-	testing.expect(t, DEFAULT_GRAPH != WILDCARD)
+	testing.expect_value(t, id_kind(UNBOUND), Term_Kind.Sentinel)
+	testing.expect_value(t, id_counter(UNBOUND), u64(2))
+
+	// The three are mutually distinct, and none of them is ID 0 — the
+	// reason UNBOUND has to be reserved here at all, since ID 0 is a
+	// perfectly good term (the first IRI).
+	sentinels := [?]Term_ID{DEFAULT_GRAPH, WILDCARD, UNBOUND}
+	for a, i in sentinels {
+		testing.expect(t, a != Term_ID(0))
+		for b in sentinels[i + 1:] {
+			testing.expect(t, a != b)
+		}
+	}
 
 	// Sentinels collide with no assignable ID of any real kind.
 	for kind in ([?]Term_Kind{.IRI, .Blank_Node, .Literal, .Triple}) {
-		testing.expect(t, id_kind(DEFAULT_GRAPH) != kind)
-		testing.expect(t, id_kind(WILDCARD) != kind)
+		for sentinel in sentinels {
+			testing.expect(t, id_kind(sentinel) != kind)
+		}
 	}
 }
 

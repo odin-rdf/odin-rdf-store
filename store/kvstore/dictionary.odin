@@ -95,15 +95,7 @@ intern_term_txn :: proc(s: ^Store, txn: ^lmdb.Txn, term: rdf.Term) -> (id: store
 			return 0, .Language_Too_Long
 		}
 		dt := intern_canonical(s, txn, .IRI, transmute([]u8)string(v.datatype)) or_return
-
-		canonical := make([dynamic]u8, 0, ID_SIZE + 2 + len(v.language) + len(v.lexical), context.temp_allocator)
-		resize(&canonical, ID_SIZE)
-		put_id_be(canonical[:ID_SIZE], dt)
-		append(&canonical, u8(v.direction))
-		append(&canonical, u8(len(v.language)))
-		append(&canonical, v.language)
-		append(&canonical, v.lexical)
-		return intern_canonical(s, txn, .Literal, canonical[:])
+		return intern_canonical(s, txn, .Literal, literal_canonical(dt, v))
 
 	case ^rdf.Triple:
 		assert(v != nil, "intern_term_txn: nil triple term")
@@ -114,6 +106,33 @@ intern_term_txn :: proc(s: ^Store, txn: ^lmdb.Txn, term: rdf.Term) -> (id: store
 		return intern_triple_ids_txn(s, txn, components)
 	}
 	panic("intern_term_txn: nil term")
+}
+
+// literal_canonical builds a literal's canonical bytes (STORE-A-0003
+// §2) given its already-resolved datatype ID: [datatype ID][direction]
+// [language length][language][lexical form]. The buffer is scratch for
+// hashing and storing, so it comes from the temp allocator; callers on
+// both the intern and the find path must have checked the language
+// length fits the format's one-byte field.
+@(private)
+literal_canonical :: proc(dt: store.Term_ID, v: rdf.Literal) -> []u8 {
+	canonical := make([dynamic]u8, 0, ID_SIZE + 2 + len(v.language) + len(v.lexical), context.temp_allocator)
+	resize(&canonical, ID_SIZE)
+	put_id_be(canonical[:ID_SIZE], dt)
+	append(&canonical, u8(v.direction))
+	append(&canonical, u8(len(v.language)))
+	append(&canonical, v.language)
+	append(&canonical, v.lexical)
+	return canonical[:]
+}
+
+// triple_canonical writes a triple term's canonical bytes — its three
+// component IDs, big-endian — into a 3*ID_SIZE buffer.
+@(private)
+triple_canonical :: proc(buf: []u8, components: [3]store.Term_ID) {
+	for c, i in components {
+		put_id_be(buf[i * ID_SIZE:][:ID_SIZE], c)
+	}
 }
 
 // intern_triple_ids_txn interns the RDF-star triple term whose
@@ -130,15 +149,50 @@ intern_triple_ids_txn :: proc(
 	err: Error,
 ) {
 	canonical: [3 * ID_SIZE]u8
-	for c, i in components {
-		put_id_be(canonical[i * ID_SIZE:][:ID_SIZE], c)
-	}
+	triple_canonical(canonical[:], components)
 	return intern_canonical(s, txn, .Triple, canonical[:])
 }
 
+// probe_canonical is the verified term2id lookup of STORE-A-0003 §4:
+// hash the canonical bytes, then confirm any hit against the id2term
+// content behind the candidate ID, so a true collision between distinct
+// terms is detected rather than silently answered with the wrong ID.
+// Read-only — the lookup half shared by intern_canonical and find_term.
+@(private)
+probe_canonical :: proc(
+	s: ^Store,
+	txn: ^lmdb.Txn,
+	kind: store.Term_Kind,
+	canonical: []u8,
+) -> (
+	id: store.Term_ID,
+	found: bool,
+	err: Error,
+) {
+	key_buf: [TERM2ID_KEY_SIZE]u8
+	term2id_key(key_buf[:], kind, canonical)
+	key := val_of(key_buf[:])
+
+	data: lmdb.Val
+	rc := lmdb.get(txn, s.dbi[.Term2id], &key, &data)
+	if rc == lmdb.NOTFOUND {
+		return 0, false, nil
+	}
+	check(rc) or_return
+
+	candidate := get_id_be(val_bytes(data))
+	stored := id2term_get(s, txn, candidate) or_return
+	if string(stored) != string(canonical) {
+		// Distinct content behind the same 128-bit key: the
+		// detected-and-rejected path (format v2 would chain here).
+		return 0, false, .Hash_Collision
+	}
+	return candidate, true, nil
+}
+
 // intern_canonical interns pre-built canonical bytes: the verified
-// term2id probe of STORE-A-0003 §4, then fresh-ID assignment with the
-// per-kind counter persisted in the same transaction.
+// term2id probe, then fresh-ID assignment with the per-kind counter
+// persisted in the same transaction.
 @(private)
 intern_canonical :: proc(
 	s: ^Store,
@@ -149,22 +203,9 @@ intern_canonical :: proc(
 	id: store.Term_ID,
 	err: Error,
 ) {
-	key_buf: [TERM2ID_KEY_SIZE]u8
-	term2id_key(key_buf[:], kind, canonical)
-	key := val_of(key_buf[:])
-
-	data: lmdb.Val
-	rc := lmdb.get(txn, s.dbi[.Term2id], &key, &data)
-	if rc != lmdb.NOTFOUND {
-		check(rc) or_return
-		candidate := get_id_be(val_bytes(data))
-		stored := id2term_get(s, txn, candidate) or_return
-		if string(stored) == string(canonical) {
-			return candidate, nil
-		}
-		// Distinct content behind the same 128-bit key: the
-		// detected-and-rejected path (format v2 would chain here).
-		return 0, .Hash_Collision
+	existing, found := probe_canonical(s, txn, kind, canonical) or_return
+	if found {
+		return existing, nil
 	}
 
 	counter := s.next[u8(kind)]
@@ -176,6 +217,10 @@ intern_canonical :: proc(
 	id_key := val_of(id_buf[:])
 	content := val_of(canonical)
 	check(lmdb.put(txn, s.dbi[.Id2term], &id_key, &content, 0)) or_return
+
+	key_buf: [TERM2ID_KEY_SIZE]u8
+	term2id_key(key_buf[:], kind, canonical)
+	key := val_of(key_buf[:])
 	id_val := val_of(id_buf[:])
 	check(lmdb.put(txn, s.dbi[.Term2id], &key, &id_val, 0)) or_return
 
@@ -183,6 +228,69 @@ intern_canonical :: proc(
 	counter_keys := meta_counter_keys
 	meta_put(s, txn, counter_keys[u8(kind)], counter + 1) or_return
 	return id, nil
+}
+
+// find_term returns the ID a term already has, or found=false if the
+// store has never seen it. Unlike intern_term it assigns nothing and
+// writes nothing: it runs in a read transaction, so it is the query
+// path's entry point — resolving a query constant that happens to be
+// absent must neither grow the dictionary nor require a writable
+// environment. Works against a store opened read-only.
+find_term :: proc(s: ^Store, term: rdf.Term) -> (id: store.Term_ID, found: bool, err: Error) {
+	txn: ^lmdb.Txn
+	check(lmdb.txn_begin(s.env, nil, lmdb.RDONLY, &txn)) or_return
+	defer lmdb.txn_abort(txn)
+	return find_term_txn(s, txn, term)
+}
+
+// find_term_txn is find_term inside a caller-owned transaction (read or
+// write), mirroring intern_term_txn minus every assignment.
+find_term_txn :: proc(
+	s: ^Store,
+	txn: ^lmdb.Txn,
+	term: rdf.Term,
+) -> (
+	id: store.Term_ID,
+	found: bool,
+	err: Error,
+) {
+	switch v in term {
+	case rdf.IRI:
+		return probe_canonical(s, txn, .IRI, transmute([]u8)string(v))
+
+	case rdf.Blank_Node:
+		return probe_canonical(s, txn, .Blank_Node, transmute([]u8)string(v))
+
+	case rdf.Literal:
+		if len(v.language) > 255 {
+			// Too long for the format's language field, so no stored
+			// literal can carry it. On the read path that is simply
+			// absent, not the error interning would raise.
+			return 0, false, nil
+		}
+		dt, dt_found := probe_canonical(s, txn, .IRI, transmute([]u8)string(v.datatype)) or_return
+		if !dt_found {
+			return 0, false, nil
+		}
+		return probe_canonical(s, txn, .Literal, literal_canonical(dt, v))
+
+	case ^rdf.Triple:
+		// Component-wise: a triple term whose parts are not all present
+		// cannot itself be present.
+		assert(v != nil, "find_term_txn: nil triple term")
+		components: [3]store.Term_ID
+		for part, i in ([3]rdf.Term{v.subject, v.predicate, v.object}) {
+			component, component_found := find_term_txn(s, txn, part) or_return
+			if !component_found {
+				return 0, false, nil
+			}
+			components[i] = component
+		}
+		canonical: [3 * ID_SIZE]u8
+		triple_canonical(canonical[:], components)
+		return probe_canonical(s, txn, .Triple, canonical[:])
+	}
+	panic("find_term_txn: nil term")
 }
 
 // id2term_get reads a term's canonical bytes; the slice is a view into
@@ -218,6 +326,18 @@ intern_graph_label_txn :: proc(s: ^Store, txn: ^lmdb.Txn, g: rdf.Graph_Label) ->
 		return intern_term_txn(s, txn, v)
 	}
 	return store.DEFAULT_GRAPH, nil
+}
+
+// find_graph_label is find_term for the graph position: a nil label is
+// always found, as DEFAULT_GRAPH.
+find_graph_label :: proc(s: ^Store, g: rdf.Graph_Label) -> (id: store.Term_ID, found: bool, err: Error) {
+	switch v in g {
+	case rdf.IRI:
+		return find_term(s, v)
+	case rdf.Blank_Node:
+		return find_term(s, v)
+	}
+	return store.DEFAULT_GRAPH, true, nil
 }
 
 // fresh_blank interns a brand-new blank node distinct from every

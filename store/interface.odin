@@ -19,6 +19,27 @@ package store
 // take backend-specific parameters (a path, options). The names,
 // semantics, and iteration contract are what the convention fixes.
 //
+// Every backend also implements the term dictionary its IDs come from —
+// the same convention, over whatever the backend calls its dictionary
+// handle:
+//
+//	intern_term(d, term) -> Term_ID           assign on first sight
+//	find_term(d, term) -> (Term_ID, bool)     lookup only; never assigns
+//	lookup_term(d, id) -> rdf.Term            the reverse direction
+//	intern_graph_label / find_graph_label / lookup_graph_label
+//	                                          the same three for the
+//	                                          graph position, where a nil
+//	                                          label is DEFAULT_GRAPH
+//
+// find_term is the query path's entry point. An engine resolving a
+// query's ground terms to IDs asks about terms the store may never have
+// seen, and getting an ID for one of them would be wrong twice over: it
+// pollutes the dictionary, and it makes reading a write. So find_term
+// assigns nothing and, in persistent backends, writes nothing — it
+// serves from a read transaction and works against a read-only
+// environment. An absent term reports found=false, which a caller
+// short-circuits to an empty result.
+//
 // Semantics every backend must satisfy (the conformance package is
 // the executable form of this contract; backends instantiate it as
 // described there):
@@ -39,6 +60,9 @@ package store
 //   - Ordering: v1 guarantees nothing about the order matches are
 //     yielded in. Expected to be revised when the SPARQL planner
 //     arrives (STORE-A-0002 review triggers).
+//   - UNBOUND belongs to the layer above: unlike DEFAULT_GRAPH and
+//     WILDCARD it is valid in neither a stored quad nor a pattern, and
+//     no backend ever produces or accepts one.
 //   - Stored quads must not contain WILDCARD, and the graph position
 //     must be an IRI ID, a blank-node ID, or DEFAULT_GRAPH. Term-kind
 //     validity per the RDF grammars (e.g. no literal subjects) is the

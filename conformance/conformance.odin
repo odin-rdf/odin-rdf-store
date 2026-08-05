@@ -31,6 +31,12 @@ Backend :: struct {
 	intern_term:   proc(ctx: rawptr, term: rdf.Term) -> store.Term_ID,
 	encode_quad:   proc(ctx: rawptr, q: rdf.Quad) -> store.Encoded_Quad,
 	intern_graph:  proc(ctx: rawptr, g: rdf.Graph_Label) -> store.Term_ID,
+	find_term:     proc(ctx: rawptr, term: rdf.Term) -> (store.Term_ID, bool),
+	find_graph:    proc(ctx: rawptr, g: rdf.Graph_Label) -> (store.Term_ID, bool),
+	// dict_size reports how many terms the dictionary has assigned IDs
+	// to, across all kinds — the observable check_find_term watches to
+	// prove a failed find assigned nothing.
+	dict_size:     proc(ctx: rawptr) -> int,
 }
 
 // fixture_quads encodes a dataset spanning the contract's edge cases:
@@ -186,6 +192,82 @@ check_no_match_and_exhaustion :: proc(t: ^testing.T, b: ^Backend) {
 		_, again := b.match_next(it)
 		testing.expect_value(t, again, false)
 	}
+}
+
+// check_find_term verifies the non-interning term lookup: terms the
+// dictionary knows resolve to the IDs interning gave them, terms it
+// does not know report not-found, and a not-found answer assigns
+// nothing. The last part is the point of the procedure — the query path
+// resolves ground terms against the store and must not grow it.
+check_find_term :: proc(t: ^testing.T, b: ^Backend) {
+	quads := fixture_quads(b)
+	defer delete(quads)
+
+	statement := rdf.Triple {
+		subject   = rdf.IRI("http://example.org/alice"),
+		predicate = rdf.IRI("http://example.org/knows"),
+		object    = rdf.IRI("http://example.org/bob"),
+	}
+	present := [?]rdf.Term {
+		rdf.IRI("http://example.org/alice"),
+		rdf.Blank_Node("b0"),
+		rdf.literal("chat", "fr"),
+		rdf.literal_typed("42", rdf.IRI("http://www.w3.org/2001/XMLSchema#integer")),
+		&statement, // an RDF-star triple term, matched by its components
+	}
+	for term in present {
+		id, found := b.find_term(b.ctx, term)
+		testing.expect(t, found, "find_term missed an interned term")
+		testing.expect_value(t, id, b.intern_term(b.ctx, term))
+	}
+
+	// Components all known, combination not: a triple term is present
+	// only as itself.
+	unknown_combination := rdf.Triple {
+		subject   = rdf.IRI("http://example.org/bob"),
+		predicate = rdf.IRI("http://example.org/knows"),
+		object    = rdf.IRI("http://example.org/alice"),
+	}
+	unknown_component := rdf.Triple {
+		subject   = rdf.IRI("http://example.org/alice"),
+		predicate = rdf.IRI("http://example.org/knows"),
+		object    = rdf.IRI("http://example.org/nobody"),
+	}
+	absent := [?]rdf.Term {
+		rdf.IRI("http://example.org/nobody"),
+		rdf.Blank_Node("b-absent"),
+		rdf.literal("chat", "de"), // known lexical form, unknown language tag
+		rdf.literal_typed("42", rdf.IRI("http://example.org/unknown-datatype")),
+		&unknown_combination,
+		&unknown_component,
+	}
+
+	size := b.dict_size(b.ctx)
+	// Twice: the second pass would find what the first had assigned.
+	for _ in 0 ..< 2 {
+		for term in absent {
+			_, found := b.find_term(b.ctx, term)
+			testing.expect(t, !found, "find_term claimed a term the dictionary never saw")
+		}
+	}
+	testing.expect_value(t, b.dict_size(b.ctx), size)
+
+	// The graph-position counterpart, mirroring intern_graph_label: a
+	// nil label is always found as DEFAULT_GRAPH.
+	dg, dg_found := b.find_graph(b.ctx, nil)
+	testing.expect(t, dg_found, "the default graph is always present")
+	testing.expect_value(t, dg, store.DEFAULT_GRAPH)
+
+	labels := [?]rdf.Graph_Label{rdf.IRI("http://example.org/g1"), rdf.Blank_Node("gb")}
+	for label in labels {
+		id, found := b.find_graph(b.ctx, label)
+		testing.expect(t, found, "find_graph_label missed an interned label")
+		testing.expect_value(t, id, b.intern_graph(b.ctx, label))
+	}
+
+	_, unknown_graph := b.find_graph(b.ctx, rdf.IRI("http://example.org/g-absent"))
+	testing.expect(t, !unknown_graph, "find_graph_label claimed an absent label")
+	testing.expect_value(t, b.dict_size(b.ctx), size)
 }
 
 // check_default_vs_named_graphs verifies the three graph addressing
