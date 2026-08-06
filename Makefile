@@ -11,11 +11,13 @@ COLL := -collection:rdf=../odin-rdf-parser
 
 # Every package with tests. The two backends are peers of one interface and
 # each carries its own suite; conformance is the executable form of the
-# contract, instantiated once per backend.
+# contract, instantiated once per backend; tests/readme compiles the README's
+# examples so the documentation cannot drift from the API.
 PKGS := store \
 				store/memstore \
 				store/kvstore \
-				conformance
+				conformance \
+				tests/readme
 
 # STORE-A-0001 guardrail: the Term_ID width is a build-time choice and both
 # configurations stay green, so the suite runs twice rather than once. This is
