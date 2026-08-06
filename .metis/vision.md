@@ -4,7 +4,7 @@ level: vision
 title: "odin-rdf-store"
 short_code: "STORE-V-0001"
 created_at: 2026-08-04T16:46:31.177132+00:00
-updated_at: 2026-08-04T16:47:31.066197+00:00
+updated_at: 2026-08-06T12:00:00.000000+00:00
 archived: false
 
 tags:
@@ -12,7 +12,7 @@ tags:
   - "#phase/published"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 initiative_id: NULL
 ---
 
@@ -38,7 +38,15 @@ The library is deliberately low-level: it supplies the storage primitives on whi
 
 ## Current State
 
-The project is at its inception; no store code exists. Its foundation is complete: odin-rdf-parser parses and emits N-Triples, N-Quads, Turtle, and TriG with 100% W3C conformance (1045 tests), RDF 1.2/RDF-star included, with documented zero-copy and clone/intern contracts designed for exactly this consumer. Odin has no established RDF ecosystem; the store starts from a clean slate.
+**Every success criterion is met (2026-08-06).** Both initiatives are complete. STORE-I-0001 delivered the term dictionary, the permutation-indexed in-memory dataset, and the match interface itself (STORE-A-0002); STORE-I-0002 delivered the persistent LMDB backend behind the same procedure set, with its on-disk format pinned in STORE-A-0003. One shared conformance suite — all 16 bound/wildcard pattern combinations, set semantics, default vs. named graphs, blank-node identity, RDF-star terms — passes **verbatim against both backends at both `Term_ID` widths**, which is what makes "multiple backends of one interface" a demonstration rather than a claim.
+
+The interface has been proven by a real consumer: **odin-rdf-sparql** evaluates the full SPARQL algebra against it through the public contract alone, with no private hooks into either backend. It absorbed that use without redesign, and the capabilities it surfaced became seven backlog items rather than workarounds — the one interface revision this vision anticipated, arriving with evidence attached. `find_term` (STORE-T-0014) was the first, implemented in both backends before the engine needed it.
+
+Round-tripping through odin-rdf-parser preserves data semantics for all four formats, and bulk ingestion at scale validated the parser's clone/intern contract in real use — closing the last open criterion in the parser's vision, RDF-V-0001.
+
+Since then: STORE-A-0004 reversed STORE-I-0002's darwin_arm64-only platform stance. The LMDB C sources are vendored at `LMDB_0.9.35` and an archive is built and suite-verified per platform — macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64 — so every supported platform links a proven archive and `system:lmdb` is a fallback rather than the plan. CI runs on Linux, macOS, and Windows. Tagged **v0.1.0**.
+
+Outstanding work is growth, not debt: seven backlog items covering ordered iteration, cardinality estimates, snapshot reads, dataset introspection, a named-graph wildcard, `triple_parts`, and sentinel reservation. Two of them — dataset introspection and the named-graph wildcard — are the ones **odin-rdf-shacl** is most likely to pull when its target resolution lands.
 
 ## Future State
 
