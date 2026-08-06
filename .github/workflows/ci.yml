@@ -1,0 +1,55 @@
+# `make test` runs the whole matrix (both Term_ID widths) and `make check`
+# vets every package, so this workflow's only real job is arranging the
+# checkout the way the Makefile's collections expect.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # vendor/lmdb ships a darwin_arm64 static library; every other platform
+    # falls back to `system:lmdb`, which this project does not test
+    # (STORE-I-0002 decision 1). macos-latest is arm64, so CI runs on the
+    # one tested platform. Adding a Linux leg means installing liblmdb-dev
+    # and accepting a configuration nothing has exercised yet.
+    runs-on: macos-latest
+
+    steps:
+      # The parser is reached through -collection:rdf=../odin-rdf-parser, a
+      # path relative to this repo, so both checkouts go into sibling
+      # directories under the workspace rather than the default layout.
+      - uses: actions/checkout@v5
+        with:
+          path: odin-rdf-store
+
+      # Tracks the parser's main. Once the family publishes tags, pin this
+      # with `ref:` so a parser change cannot break this repo's CI without
+      # a deliberate bump.
+      - uses: actions/checkout@v5
+        with:
+          repository: odin-rdf/odin-rdf-parser
+          path: odin-rdf-parser
+
+      - uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: latest
+
+      - name: Odin version
+        run: odin version
+
+      - name: Vet every package
+        working-directory: odin-rdf-store
+        run: make check
+
+      - name: Test at both Term_ID widths
+        working-directory: odin-rdf-store
+        run: make test
