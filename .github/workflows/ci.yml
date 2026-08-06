@@ -15,12 +15,12 @@ concurrency:
 
 jobs:
   test:
-    # vendor/lmdb ships a darwin_arm64 static library; every other platform
-    # falls back to `system:lmdb`, which this project does not test
-    # (STORE-I-0002 decision 1). macos-latest is arm64, so CI runs on the
-    # one tested platform. Adding a Linux leg means installing liblmdb-dev
-    # and accepting a configuration nothing has exercised yet.
-    runs-on: macos-latest
+    strategy:
+      # One platform failing should not hide the others' results.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       # The parser is reached through -collection:rdf=../odin-rdf-parser, a
