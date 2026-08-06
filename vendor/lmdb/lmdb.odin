@@ -179,9 +179,19 @@ absolute path is appended to it rather than replacing it. Naming a directory
 with -L cannot work either -- Homebrew symlinks liblmdb.a and liblmdb.dylib
 side by side, and the linker takes the dylib when both match -llmdb.
 
-Platforms without an archive here fall back to the system library. */
+The archives are built from the C sources in upstream/ by the build-lmdb
+workflow, one job per platform, and committed here. Platforms without an
+archive still fall back to the system library. */
 when ODIN_OS == .Darwin && ODIN_ARCH == .arm64 {
 	foreign import lib "liblmdb_darwin_arm64.a"
+} else when ODIN_OS == .Darwin && ODIN_ARCH == .amd64 {
+	foreign import lib "liblmdb_darwin_amd64.a"
+} else when ODIN_OS == .Linux && ODIN_ARCH == .arm64 {
+	foreign import lib "liblmdb_linux_arm64.a"
+} else when ODIN_OS == .Linux && ODIN_ARCH == .amd64 {
+	foreign import lib "liblmdb_linux_amd64.a"
+} else when ODIN_OS == .Windows && ODIN_ARCH == .amd64 {
+	foreign import lib "lmdb_windows_amd64.lib"
 } else {
 	foreign import lib "system:lmdb"
 }

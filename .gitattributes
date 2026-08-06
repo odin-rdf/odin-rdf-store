@@ -1,0 +1,5 @@
+# The LMDB archives are build outputs committed for convenience. Marking them
+# binary explicitly keeps git from ever attempting a text diff or merge, and
+# documents that a change here is a rebuild rather than an edit.
+vendor/lmdb/*.a binary
+vendor/lmdb/*.lib binary

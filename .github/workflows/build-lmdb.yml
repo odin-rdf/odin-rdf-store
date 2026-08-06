@@ -1,0 +1,99 @@
+# Builds the vendored LMDB archives from vendor/lmdb/upstream, one job per
+# platform, and proves each one works by running the full store suite against
+# it. Artifacts are downloaded and committed by hand: binaries entering the
+# tree should be a deliberate act, not a side effect of a workflow run.
+#
+# Manual trigger only. Re-run it when the vendored LMDB version changes or a
+# platform is added -- not on every push.
+name: Build LMDB archives
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      # Every platform's result is wanted, especially when one fails.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            artifact: liblmdb_darwin_arm64.a
+          - os: macos-13
+            artifact: liblmdb_darwin_amd64.a
+          - os: ubuntu-latest
+            artifact: liblmdb_linux_amd64.a
+          - os: ubuntu-24.04-arm
+            artifact: liblmdb_linux_arm64.a
+          - os: windows-latest
+            artifact: lmdb_windows_amd64.lib
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: odin-rdf-store
+
+      # The suite imports the parser, so verification needs it present.
+      - uses: actions/checkout@v5
+        with:
+          repository: odin-rdf/odin-rdf-parser
+          path: odin-rdf-parser
+
+      # Upstream's own flags minus -g: no debug info keeps the archive small
+      # and the bytes stable. NDEBUG is deliberately not set -- LMDB ships
+      # with its assertions live, and this build should not differ from what
+      # upstream's Makefile produces in anything but debug info.
+      - name: Build (Unix)
+        if: runner.os != 'Windows'
+        working-directory: odin-rdf-store/vendor/lmdb
+        run: |
+          cc -c -pthread -O2 upstream/mdb.c upstream/midl.c
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # Apple's ar has no -D; this is its deterministic switch.
+            ZERO_AR_DATE=1 ar rcs "${{ matrix.artifact }}" mdb.o midl.o
+          else
+            # GNU ar: D is deterministic mode (zeroed uid/gid/mtime).
+            ar rcsD "${{ matrix.artifact }}" mdb.o midl.o
+          fi
+          rm -f mdb.o midl.o
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # Odin links through MSVC's linker on Windows, so the archive has to be
+      # an MSVC-built .lib -- a MinGW .a will not do. /MD matches the dynamic
+      # CRT Odin's own objects use; a mismatch here surfaces as duplicate or
+      # missing CRT symbols at link time.
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        working-directory: odin-rdf-store/vendor/lmdb
+        run: |
+          cl /c /O2 /MD upstream/mdb.c upstream/midl.c
+          lib /OUT:${{ matrix.artifact }} mdb.obj midl.obj
+          Remove-Item mdb.obj, midl.obj
+
+      - uses: laytan/setup-odin@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release: latest
+
+      # The point of the job: not that the archive built, but that the store
+      # links against it and passes at both Term_ID widths on this platform.
+      - name: Verify against the full suite
+        working-directory: odin-rdf-store
+        run: make test
+
+      - name: Checksum
+        working-directory: odin-rdf-store/vendor/lmdb
+        shell: bash
+        run: |
+          ls -l "${{ matrix.artifact }}"
+          shasum -a 256 "${{ matrix.artifact }}" || sha256sum "${{ matrix.artifact }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: odin-rdf-store/vendor/lmdb/${{ matrix.artifact }}
+          if-no-files-found: error
