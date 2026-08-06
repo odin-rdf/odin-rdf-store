@@ -19,7 +19,7 @@ jobs:
         include:
           - os: macos-latest
             artifact: liblmdb_darwin_arm64.a
-          - os: macos-13
+          - os: macos-15-intel
             artifact: liblmdb_darwin_amd64.a
           - os: ubuntu-latest
             artifact: liblmdb_linux_amd64.a
@@ -63,14 +63,17 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       # Odin links through MSVC's linker on Windows, so the archive has to be
-      # an MSVC-built .lib -- a MinGW .a will not do. /MD matches the dynamic
-      # CRT Odin's own objects use; a mismatch here surfaces as duplicate or
-      # missing CRT symbols at link time.
+      # an MSVC-built .lib -- a MinGW .a will not do.
+      #
+      # /MT, not /MD: Odin links the static CRT (libucrt.lib). Building LMDB
+      # against the dynamic CRT makes it reference the __imp_-prefixed import
+      # thunks (__imp_strerror, __imp_realloc, __imp__aligned_malloc), which
+      # the static CRT does not define -- LNK2019 at link time.
       - name: Build (Windows)
         if: runner.os == 'Windows'
         working-directory: odin-rdf-store/vendor/lmdb
         run: |
-          cl /c /O2 /MD upstream/mdb.c upstream/midl.c
+          cl /c /O2 /MT upstream/mdb.c upstream/midl.c
           lib /OUT:${{ matrix.artifact }} mdb.obj midl.obj
           Remove-Item mdb.obj, midl.obj
 

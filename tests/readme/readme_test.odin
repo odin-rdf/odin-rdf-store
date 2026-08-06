@@ -150,13 +150,24 @@ readme_persistent_example :: proc(t: ^testing.T) {
 	testing.expect_value(t, matched, 2)
 }
 
+// The separator is added here rather than assumed: macOS exports TMPDIR with
+// a trailing slash and Linux usually exports nothing, so concatenating onto
+// the variable yields a path at the filesystem root on Linux. Windows names
+// the variable TEMP or TMP.
 @(private = "file")
 readme_db_path :: proc() -> string {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" {
+		tmp = os.get_env("TEMP", context.temp_allocator)
+	}
+	if tmp == "" {
+		tmp = os.get_env("TMP", context.temp_allocator)
+	}
+	if tmp == "" {
 		tmp = "/tmp"
 	}
-	return fmt.aprintf("%sodin-rdf-store-readme-%d", tmp, os.get_pid())
+	tmp = strings.trim_right(tmp, `/\`)
+	return fmt.aprintf("%s/odin-rdf-store-readme-%d", tmp, os.get_pid())
 }
 
 @(private = "file")

@@ -6,6 +6,7 @@ package main
 
 import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:time"
 
 import "rdf:bench/corpus"
@@ -30,13 +31,24 @@ bench_lmdb :: proc() {
 	bench_match_scans(src_nt)
 }
 
+// The separator is added here rather than assumed: macOS exports TMPDIR with
+// a trailing slash and Linux usually exports nothing, so concatenating onto
+// the variable yields a path at the filesystem root on Linux. Windows names
+// the variable TEMP or TMP.
 @(private = "file")
 bench_db_path :: proc(name: string) -> string {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" {
+		tmp = os.get_env("TEMP", context.temp_allocator)
+	}
+	if tmp == "" {
+		tmp = os.get_env("TMP", context.temp_allocator)
+	}
+	if tmp == "" {
 		tmp = "/tmp"
 	}
-	return fmt.aprintf("%sodin-rdf-store-bench-%s-%d", tmp, name, os.get_pid())
+	tmp = strings.trim_right(tmp, `/\`)
+	return fmt.aprintf("%s/odin-rdf-store-bench-%s-%d", tmp, name, os.get_pid())
 }
 
 @(private = "file")

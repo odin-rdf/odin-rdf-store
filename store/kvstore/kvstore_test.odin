@@ -3,6 +3,7 @@ package kvstore
 import "core:encoding/endian"
 import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:testing"
 
 import lmdb "../../vendor/lmdb"
@@ -13,11 +14,29 @@ import store ".."
 // of this package's test files.
 @(private)
 test_db_path :: proc(name: string) -> string {
+	return temp_path("test", name)
+}
+
+// temp_path joins the OS temp directory with a run-unique name. The
+// separator is added here rather than assumed: macOS exports TMPDIR with a
+// trailing slash and Linux usually exports nothing at all, so concatenating
+// straight onto the variable yields "/tmpodin-rdf-store-..." at the
+// filesystem root on Linux, which a non-root user cannot create. Windows
+// names the variable TEMP or TMP and has no /tmp to fall back to.
+@(private)
+temp_path :: proc(kind, name: string) -> string {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
+	if tmp == "" {
+		tmp = os.get_env("TEMP", context.temp_allocator)
+	}
+	if tmp == "" {
+		tmp = os.get_env("TMP", context.temp_allocator)
+	}
 	if tmp == "" {
 		tmp = "/tmp"
 	}
-	return fmt.aprintf("%sodin-rdf-store-test-%s-%d", tmp, name, os.get_pid())
+	tmp = strings.trim_right(tmp, `/\`)
+	return fmt.aprintf("%s/odin-rdf-store-%s-%s-%d", tmp, kind, name, os.get_pid())
 }
 
 @(private)
