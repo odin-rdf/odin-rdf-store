@@ -1,5 +1,7 @@
 # odin-rdf-store
 
+[![CI](https://github.com/odin-rdf/odin-rdf-store/actions/workflows/ci.yml/badge.svg)](https://github.com/odin-rdf/odin-rdf-store/actions/workflows/ci.yml)
+
 RDF quad storage for Odin: a dataset of quads over a term dictionary,
 with **one match interface** and two backends behind it — `memstore`
 in memory and `kvstore` persistent over LMDB. Both pass the same
