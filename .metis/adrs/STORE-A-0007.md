@@ -1,19 +1,19 @@
 ---
-id: 001-transactions-and-snapshots-one-handle
+id: 001-transactions-and-snapshots-one
 level: adr
 title: "Transactions and snapshots: one handle, two modes"
 number: 1
 short_code: "STORE-A-0007"
-created_at: 2026-08-07T20:35:00.000000+00:00
-updated_at: 2026-08-07T20:35:00.000000+00:00
+created_at: 2026-08-07T20:35:00+00:00
+updated_at: 2026-08-07T21:41:07.102288+00:00
 decision_date: 
-decision_maker: 
+decision_maker: gregerolsson
 parent: 
 archived: false
 
 tags:
   - "#adr"
-  - "#phase/draft"
+  - "#phase/decided"
 
 
 exit_criteria_met: false

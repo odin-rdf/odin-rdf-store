@@ -1,19 +1,19 @@
 ---
-id: 001-one-backend-odin-rdf-store-is
+id: 001-one-backend-odin-rdf-store-is-a
 level: adr
 title: "One backend: odin-rdf-store is a library over LMDB"
 number: 1
 short_code: "STORE-A-0006"
-created_at: 2026-08-07T16:35:00.000000+00:00
-updated_at: 2026-08-07T16:35:00.000000+00:00
+created_at: 2026-08-07T16:35:00+00:00
+updated_at: 2026-08-07T21:40:53.192273+00:00
 decision_date: 
-decision_maker: 
+decision_maker: gregerolsson
 parent: 
 archived: false
 
 tags:
   - "#adr"
-  - "#phase/draft"
+  - "#phase/decided"
 
 
 exit_criteria_met: false
