@@ -3,15 +3,15 @@ id: port-bench-to-kvstore-and-retire
 level: task
 title: "Port bench/ to kvstore and retire the memstore baselines"
 short_code: "STORE-T-0029"
-created_at: 2026-08-07T16:22:25.000000+00:00
-updated_at: 2026-08-07T16:22:25.000000+00:00
+created_at: 2026-08-07T16:22:25+00:00
+updated_at: 2026-08-07T16:46:18.064346+00:00
 parent: STORE-I-0003
-blocked_by: ["STORE-T-0025"]
+blocked_by: [STORE-T-0025]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/active"
 
 
 exit_criteria_met: false
@@ -44,21 +44,21 @@ backend over the same data." That comparison is the thing being removed, not por
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] `bench/main.odin` drives kvstore; the four format loaders take a `^kvstore.Store`.
+- [x] `bench/main.odin` drives kvstore; the four format loaders take a `^kvstore.Store`.
       Bulk-load throughput and bytes/statement are still reported.
-- [ ] `bench/lmdb.odin`'s memstore comparison is removed, and what it measured is recorded
+- [x] `bench/lmdb.odin`'s memstore comparison is removed, and what it measured is recorded
       as removed — the durable/no_sync split and the disk bytes/statement figures survive
       on their own merits.
-- [ ] **STORE-I-0001's benchmark-baseline status update is annotated in place**, dated,
+- [x] **STORE-I-0001's benchmark-baseline status update is annotated in place**, dated,
       marking those figures as measured against a backend that no longer exists and
       therefore not comparable to anything measured afterwards. Do not delete them: they
       are the record of why the pending-buffer/lazy-merge design was adopted (the O(n²)
       finding), which is still true history.
-- [ ] Fresh kvstore baselines recorded, at both `Term_ID` widths, with the configuration
+- [x] Fresh kvstore baselines recorded, at both `Term_ID` widths, with the configuration
       stated (durable vs `no_sync`, map size, platform) — because unlike the memstore
       figures these are sensitive to configuration and a bare number would be misleading.
-- [ ] `make bench` builds and runs clean with release flags.
-- [ ] Any remaining reference to a "bulk load benchmark guarding against silent copy
+- [x] `make bench` builds and runs clean with release flags.
+- [x] Any remaining reference to a "bulk load benchmark guarding against silent copy
       regressions" (STORE-I-0001's Testing Strategy) is checked: the guard's meaning changes
       when the allocations being guarded are LMDB's pages rather than the dictionary's
       clones.
@@ -97,3 +97,40 @@ becomes concrete.
 
 - **2026-08-07 — Created in STORE-I-0003's decomposition.** Decision taken at
   decomposition: port both benchmarks rather than delete either.
+- **2026-08-07 — Done. `make bench` clean at both widths, `odin check bench -vet
+  -strict-style` clean.**
+
+  **The port turned out to be a merge, not a translation.** `main.odin`'s `bench_load` and
+  `lmdb.odin`'s `bench_lmdb_load` would have become the same procedure — open a store, time
+  a load, report — so `main.odin` now holds `main()`, the corpora, and the four format
+  loaders, while `lmdb.odin` holds the measurement primitives. The format sweep gained
+  N-Quads and TriG, which the LMDB path never covered.
+
+  **The live-bytes metric did not survive, and that is a real reduction.** It measured
+  dictionary strings, maps, membership set and three index arrays through a tracking
+  allocator, and it was the thing that guarded the zero-copy discipline — a silent extra
+  copy per statement showed up there. LMDB holds all of that in mapped pages, so a tracking
+  allocator sees essentially nothing regardless of how many copies are made. On-disk
+  bytes/statement replaces it and prices pages, not copies. Recorded in three places rather
+  than dropped: the new `bench/main.odin` doc comment, the retirement block in STORE-I-0001,
+  and STORE-I-0001's Testing Strategy line, which described a guard that no longer exists.
+
+  **A second memstore dependency was in `bench_match_scans`** and was not in this task's
+  original scope: it minted the probe subject from memstore's dictionary and reused that
+  integer as a kvstore pattern, which worked only because both backends assigned the same ID
+  to the same term (STORE-A-0001 point 7, annotated historical in STORE-T-0025). The probe
+  subject is now read out of the store being measured, which is what it should always have
+  done.
+
+  **Fresh baselines recorded at both widths** in STORE-I-0001, with platform, durability
+  mode and map size stated. Two observations worth having on record:
+  - **The `no_sync` delta is negligible** (319 → 331 kstmt/s on N-Triples): the loaders wrap
+    a whole document in one write transaction (STORE-I-0002 decision 2), so a load costs one
+    fsync regardless of statement count. The durable/no_sync pair the old benchmark framed as
+    a meaningful trade-off is, at document granularity, almost no trade-off at all.
+  - **The 32-bit build's disk footprint is ~30% smaller** (216 vs 310 B/stmt on N-Triples) —
+    four IDs per index key, at half the width, three indexes, showing up directly in pages.
+
+  Throughput is roughly half the retired in-memory figures (319 vs 584 kstmt/s on N-Triples),
+  which is expected and is exactly why the old numbers had to be marked incomparable rather
+  than left standing.

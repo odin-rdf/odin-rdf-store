@@ -95,7 +95,7 @@ Test-suite driven per the vision — the suite is a deliverable, not an aftertho
 - **Dataset/match conformance suite**: written against the match interface, not the in-memory implementation, so the LMDB backend can run the identical suite later. Covers all 16 match patterns, set semantics, default vs. named graphs, empty-dataset and no-match cases, iterator behavior under exhaustion.
 - **Ingestion integration tests**: load fixtures in all four formats through odin-rdf-parser, verify counts and matches; adversarial fixtures reusing the parser's escape/RDF-star corner cases to prove the per-statement clone discipline (no dangling borrows — the kind of bug RDF-A-0001 warns the type system won't catch).
 - **Round-trip smoke test**: load → export via parser emitters → reload → datasets match (informal use of emitters; polished export API is a later initiative).
-- **Bulk-load benchmark**: a `bench/` harness tracking statements/second and bytes/statement on a large fixture, guarding against silent copy regressions (same discipline as the parser's benchmarks).
+- **Bulk-load benchmark**: a `bench/` harness tracking statements/second and bytes/statement on a large fixture, guarding against silent copy regressions (same discipline as the parser's benchmarks). *(2026-08-07, STORE-T-0029: the copy-regression guard was the live-bytes metric, and it did not survive the move to kvstore — mapped pages are not Odin allocations, so a tracking allocator sees nothing to guard. The harness still reports throughput and now on-disk bytes/statement, which prices pages rather than copies. The guard this line describes no longer exists in the store; the equivalent discipline lives on in odin-rdf-parser's own benchmarks, which is where the clone/intern contract it protected is defined.)*
 
 ## Alternatives Considered **[REQUIRED]**
 
@@ -122,6 +122,38 @@ Milestone ordering note: steps 2–3 can proceed in parallel with the ADRs for s
 - **2026-08-04 — Decomposed into 6 tasks**: STORE-T-0001 (Term_ID encoding + dual-width CI) → STORE-T-0002 (term dictionary) → STORE-T-0003 (match contract, naive dataset, conformance suite) → then STORE-T-0004 (permutation indexes) and STORE-T-0005 (parser bulk ingestion) in parallel → STORE-T-0006 (round-trip, benchmark, docs, close-out). Dependencies recorded in each task's `blocked_by` frontmatter. Awaiting human review before activation.
 - **2026-08-04 — All 6 tasks completed.** The library exists: `store/` package (Term_ID encoding, dictionary, indexed dataset behind the match interface, four-format bulk load), `bench/` harness, `scripts/test.sh` dual-width runner. 30 tests green at both widths. One design revision during execution, made on evidence exactly as decision 3 planned: the benchmark exposed per-insert sorted-array injection as O(n²) in bulk load (~19k stmt/s at 200k distinct quads), so the dataset moved to hash-set membership + pending buffer + lazy sort/merge into the indexes on first match — the conformance suite passed unchanged (the interface abstracted correctly), and bulk load reached ~600k stmt/s including index construction.
 - **Benchmark baselines (2026-08-04, Apple Silicon macOS, `odin run bench -o:speed`, 200k statements, load + index build):** 64-bit IDs — N-Triples 584 kstmt/s @ 580 B/stmt live, N-Triples escaped 588 kstmt/s @ 650 B/stmt, N-Quads 607 kstmt/s @ 649 B/stmt, Turtle 1188 kstmt/s (corpus dedupes to 3k distinct quads), TriG 1063 kstmt/s. 32-bit IDs — N-Triples 614 kstmt/s @ 461 B/stmt, N-Quads 651 kstmt/s @ 527 B/stmt (~20% less live memory, slightly faster). B/stmt counts dictionary strings + maps + membership set + three indexes on an all-distinct corpus (worst case for interning).
+
+  > **Retired 2026-08-07 (STORE-T-0029): these figures were measured against a backend that
+  > no longer exists, and nothing measured after this date is comparable to them.** They are
+  > kept, not deleted, because they are the record of why the pending-buffer/lazy-merge
+  > design was adopted — the O(n²) sorted-insertion finding above is still true history, and
+  > the 19k → 600k stmt/s improvement is still why the dataset looks the way it does.
+  >
+  > Two things make the numbers incomparable, not merely different. The **throughput**
+  > figures measured parse + intern + in-memory index construction; the same harness over
+  > LMDB measures database ingest with page writes and a commit. The **B/stmt** figures
+  > measured *live* process memory via a tracking allocator — dictionary strings, maps,
+  > membership set, three index arrays — and that metric has no kvstore analogue at all,
+  > because LMDB holds the dictionary and indexes in mapped pages rather than in
+  > Odin-allocated memory. What replaced it is on-disk bytes/statement, which prices pages
+  > rather than copies and so no longer guards the zero-copy discipline the way this one did.
+  > That is a real reduction in what the benchmark can catch, recorded here rather than
+  > discovered later.
+
+- **Benchmark baselines, kvstore (2026-08-07, Apple Silicon macOS, `make bench`, 200k
+  statements, durable unless noted, `map_size` 1 GiB):** 64-bit IDs — N-Triples 319 kstmt/s
+  @ 310.1 B/stmt disk, N-Triples escaped 336 kstmt/s @ 276.0, N-Quads 304 kstmt/s @ 305.7,
+  Turtle 300 kstmt/s @ 5.2 (corpus dedupes to 3k distinct quads), TriG 272 kstmt/s @ 7.6
+  (6k distinct). 32-bit IDs — N-Triples 345 kstmt/s @ 216.1, N-Triples escaped 372 kstmt/s
+  @ 194.0, N-Quads 327 kstmt/s @ 212.5, Turtle 296 kstmt/s @ 4.3, TriG 274 kstmt/s @ 5.1.
+  Match path: full `MATCH_ALL` drain 92.4 Mquad/s (64-bit) / 103.3 Mquad/s (32-bit);
+  10k `(g,s)`-bound probes at 495 / 518 kprobe/s, each opening its own read transaction and
+  cursor. **The `no_sync` delta is negligible** — 319 → 331 kstmt/s on N-Triples, 300 → 303
+  on Turtle — because the loaders wrap an entire document in one write transaction
+  (STORE-I-0002 decision 2), so a load costs one fsync regardless of statement count. The
+  32-bit build's ~30% smaller disk footprint is the four-IDs-per-key saving showing up
+  directly in page counts.
+
 - **2026-08-07 — The reference implementation this initiative built is retired** (STORE-A-0006,
   STORE-I-0003). memstore was the backend the match interface was defined against: the contract
   document lived in its package doc until STORE-T-0013 moved it to `store/interface.odin`, and

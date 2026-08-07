@@ -4,14 +4,14 @@ level: task
 title: "Port the store's own suite off memstore: conformance and round-trip"
 short_code: "STORE-T-0028"
 created_at: 2026-08-07T16:22:24+00:00
-updated_at: 2026-08-07T16:43:12.142956+00:00
+updated_at: 2026-08-07T16:46:17.245123+00:00
 parent: STORE-I-0003
 blocked_by: [STORE-T-0025]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -40,6 +40,8 @@ Two files, and they are not the same job:
   This is the vision's round-trip success criterion ("load → match/export → compare
   preserves data semantics for all four formats") in executable form. It must be **ported**,
   and if it is dropped instead, a vision-level criterion silently stops being tested.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 

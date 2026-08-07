@@ -1,22 +1,28 @@
-// Bulk-load throughput and memory benchmarks over the parser's
+// Bulk-load throughput and on-disk size benchmarks over the parser's
 // deterministic generated corpora. Run with:
 //
 //	odin run bench -o:speed
 //
 // Reports statements/second (wall clock over the full load: parse +
-// intern + triple index insertion) and live bytes/statement (dictionary
-// + indexes after the load, via a tracking allocator). Guards the
-// zero-copy discipline: a silent extra copy per statement shows up in
-// bytes/statement.
+// intern + index insertion + commit) and on-disk bytes/statement.
+//
+// Until 2026-08-07 this file measured the in-memory backend and reported
+// *live* bytes/statement from a tracking allocator, which guarded the
+// zero-copy discipline: a silent extra copy per statement showed up
+// there. That metric has no analogue on kvstore — LMDB holds the
+// dictionary and indexes in mapped pages rather than in Odin-allocated
+// memory, so a tracking allocator sees almost nothing regardless. The
+// disk high-water mark in bench_lmdb_load is the surviving size signal,
+// and it is a coarser one: it prices pages, not copies. Recorded in
+// STORE-T-0029 rather than quietly dropped, along with the historical
+// figures, which are not comparable to anything measured here.
 package main
 
 import "core:fmt"
-import "core:mem"
-import "core:time"
 
 import "rdf:bench/corpus"
 import store "../store"
-import memstore "../store/memstore"
+import kvstore "../store/kvstore"
 
 STATEMENTS :: 200_000
 
@@ -34,73 +40,45 @@ main :: proc() {
 	src_trig := corpus.generate_trig(STATEMENTS)
 	defer delete(src_trig)
 
-	bench_load("N-Triples load", src_nt, load_nt)
-	bench_load("N-Triples load (escaped)", src_nt_escaped, load_nt)
-	bench_load("N-Quads load", src_nq, load_nq)
-	bench_load("Turtle load", src_ttl, load_ttl)
-	bench_load("TriG load", src_trig, load_trig)
+	// The format sweep, durable — what a caller gets by default.
+	bench_lmdb_load("N-Triples load", src_nt, load_nt, false)
+	bench_lmdb_load("N-Triples (escaped)", src_nt_escaped, load_nt, false)
+	bench_lmdb_load("N-Quads load", src_nq, load_nq, false)
+	bench_lmdb_load("Turtle load", src_ttl, load_ttl, false)
+	bench_lmdb_load("TriG load", src_trig, load_trig, false)
 
-	bench_lmdb()
+	// The fsync delta, on the all-distinct (dictionary-heavy) and the
+	// deduplicating (probe-heavy) corpora. Paired with their durable runs
+	// above rather than measured alone: the number that matters is the
+	// difference.
+	bench_lmdb_load("N-Triples (no_sync)", src_nt, load_nt, true)
+	bench_lmdb_load("Turtle (no_sync)", src_ttl, load_ttl, true)
+
+	bench_match_scans(src_nt)
 }
 
-Load_Proc :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int
+Load_Proc :: proc(s: ^kvstore.Store, source: []byte) -> int
 
-load_nt :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int {
-	added, err := memstore.load_triples(d, ds, source)
-	assert(err.message == "")
+load_nt :: proc(s: ^kvstore.Store, source: []byte) -> int {
+	added, parse_err, err := kvstore.load_triples(s, source)
+	assert(err == nil && parse_err.message == "")
 	return added
 }
 
-load_nq :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int {
-	added, err := memstore.load_quads(d, ds, source)
-	assert(err.message == "")
+load_nq :: proc(s: ^kvstore.Store, source: []byte) -> int {
+	added, parse_err, err := kvstore.load_quads(s, source)
+	assert(err == nil && parse_err.message == "")
 	return added
 }
 
-load_ttl :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int {
-	added, err := memstore.load_turtle(d, ds, source)
-	assert(err.message == "")
+load_ttl :: proc(s: ^kvstore.Store, source: []byte) -> int {
+	added, parse_err, err := kvstore.load_turtle(s, source)
+	assert(err == nil && parse_err.message == "")
 	return added
 }
 
-load_trig :: proc(d: ^memstore.Dictionary, ds: ^memstore.Dataset, source: []byte) -> int {
-	added, err := memstore.load_trig(d, ds, source)
-	assert(err.message == "")
+load_trig :: proc(s: ^kvstore.Store, source: []byte) -> int {
+	added, parse_err, err := kvstore.load_trig(s, source)
+	assert(err == nil && parse_err.message == "")
 	return added
-}
-
-bench_load :: proc(label: string, src: string, load: Load_Proc) {
-	tracker: mem.Tracking_Allocator
-	mem.tracking_allocator_init(&tracker, context.allocator)
-	defer mem.tracking_allocator_destroy(&tracker)
-	allocator := mem.tracking_allocator(&tracker)
-
-	d: memstore.Dictionary
-	memstore.dictionary_init(&d, allocator)
-	ds: memstore.Dataset
-	memstore.dataset_init(&ds, allocator)
-
-	start := time.tick_now()
-	added := load(&d, &ds, transmute([]u8)src)
-	// First match builds the indexes (lazy flush) — include it in the
-	// timing so the number is load + index construction, not just parse
-	// + intern.
-	it := memstore.match(&ds, store.MATCH_ALL)
-	memstore.match_destroy(&it)
-	elapsed := time.tick_since(start)
-
-	seconds := time.duration_seconds(elapsed)
-	live := tracker.current_memory_allocated
-
-	fmt.printfln(
-		"%-26s %v stmts  %.0f kstmt/s  %.1f B/stmt live  (%v quads stored)",
-		label,
-		STATEMENTS,
-		f64(STATEMENTS) / seconds / 1000.0,
-		f64(live) / f64(STATEMENTS),
-		added,
-	)
-
-	memstore.dataset_destroy(&ds)
-	memstore.dictionary_destroy(&d)
 }
