@@ -131,3 +131,15 @@ to pass — which is a decision to make deliberately, not one to back into.
   no copy-on-write question. The finding that survives and should drive the rewrite is
   the one that matters here — **a snapshot is a read-only transaction, not a separate
   concept.** Re-open jointly with STORE-T-0022 once the removal lands.
+- **2026-08-07 — Unblocked. The model is decided in STORE-A-0007.** STORE-I-0003 landed and
+  memstore is gone, so the question this item raised is answered rather than negotiated: a
+  snapshot is a read-only `Txn`, `txn_begin(s, .Read)`, and every read procedure gains a
+  `_txn` form taking that handle. Snapshot isolation is an unconditional guarantee of the
+  contract — not a declared capability, and the conformance suite asserts it in one uniform
+  body with no branch. What this item now costs is publication: odin-rdf-sparql takes a read
+  transaction at `query_init` and releases it at `query_destroy`, which is exactly the
+  lifetime a `Query` already has. The one piece with real design in it is `match`, whose
+  iterator owns the transaction it opened; `match_txn` borrows instead, and `match_destroy`
+  closes the cursor and leaves the transaction alone. One cost is now the consumer's to know
+  rather than the backend's to hide: an open read transaction pins pages, so a long snapshot
+  makes a concurrent writer grow the file. Ready to decompose jointly with STORE-T-0022.

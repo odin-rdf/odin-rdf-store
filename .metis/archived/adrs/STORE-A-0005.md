@@ -22,8 +22,14 @@ initiative_id: NULL
 
 # ADR-5: Transactions and snapshots: one handle, two modes, a declared isolation capability
 
-> **2026-08-07 — ARCHIVED, never decided. To be rewritten after STORE-I-0003 (retire
-> memstore) lands.**
+> **2026-08-07 — ARCHIVED, never decided. Rewritten as STORE-A-0007 (STORE-T-0032), which
+> supersedes this document in substance.** Everything the note below marks as surviving was
+> carried forward; everything it marks as dead stayed dead. Read STORE-A-0007 for the
+> decision — this document is kept only because the reasoning behind its points 1 and 2 (why
+> one handle rather than two, and why the `_txn` suffix lands on the primary API) was worked
+> out here.
+>
+> *Original archival note follows.*
 >
 > This ADR's central mechanism — a declared `SNAPSHOT_ISOLATION` capability with a
 > capability-conditional conformance tier — exists solely to let two backends with

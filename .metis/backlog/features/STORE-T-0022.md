@@ -176,3 +176,18 @@ not part of it and should not be designed here.
   rewrite. The **validate-before-commit** evidence that motivated this item is unaffected
   by the removal and remains the reason it is P0. Re-open jointly with STORE-T-0019 once
   the removal lands.
+- **2026-08-07 — Unblocked. The model is decided in STORE-A-0007.** One `Txn` handle with a
+  `.Read`/`.Write` mode, carrying its own dataset; the `_txn` procedure set with the existing
+  bare procedures defined as autocommit, so nothing that compiles today stops compiling. The
+  guarantees are stated flat, with no universal-core/declared-capability split: read-your-own-writes,
+  snapshot isolation, atomicity over quads (not over the dictionary), provisional `Term_ID`s
+  discarded on abort, single writer, no nesting, and iterator invalidation on a write through
+  the same transaction. Two things the archived design left per-backend are now decided: a
+  second write transaction on one handle is **refused with an error** rather than left to
+  deadlock on LMDB's writer lock, and `Store.next` is snapshotted at begin and restored on
+  abort so the in-memory counter mirror cannot drift from the persisted one. Validate-before-commit
+  — the evidence that made this P0 — is expressible as designed: build the candidate inside a
+  write transaction, validate through that same transaction, commit or abort on the answer.
+  Its price is stated in the contract rather than discovered: that write transaction is held
+  across an entire SHACL validation by construction, and it serializes every other writer
+  against that environment for its lifetime. Ready to decompose jointly with STORE-T-0019.
