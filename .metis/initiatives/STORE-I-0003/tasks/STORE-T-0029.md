@@ -4,14 +4,14 @@ level: task
 title: "Port bench/ to kvstore and retire the memstore baselines"
 short_code: "STORE-T-0029"
 created_at: 2026-08-07T16:22:25+00:00
-updated_at: 2026-08-07T16:46:18.064346+00:00
+updated_at: 2026-08-07T16:49:22.605425+00:00
 parent: STORE-I-0003
 blocked_by: [STORE-T-0025]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -41,6 +41,8 @@ that makes them so.**
 `bench/lmdb.odin` already exists and already benchmarks kvstore, so the LMDB path is not new
 work — but its own doc says it reports "match-scan throughput compared against the in-memory
 backend over the same data." That comparison is the thing being removed, not ported.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
