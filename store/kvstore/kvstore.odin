@@ -109,9 +109,25 @@ check :: proc(rc: i32) -> Error {
 // Options tunes the environment; see LMDB's own documentation for the
 // underlying knobs.
 Options :: struct {
-	// Maximum database size. The map is sparse: this reserves address
-	// space, not disk, so reserve generously — growing it later means
-	// reopening.
+	// Maximum database size. Reserve generously — growing it later
+	// means reopening.
+	//
+	// **On Linux and macOS this reserves address space, not disk**: the
+	// map is sparse, so a 1 GiB default costs nothing until the data
+	// is there. **On Windows it reserves disk, at open.** LMDB has no
+	// sparse-file handling on that platform; without MDB_WRITEMAP (which
+	// this backend does not set) mdb_env_map calls SetEndOfFile at the
+	// full map size before CreateFileMapping, because "Windows won't
+	// create mappings for zero length files ... just set the maxsize
+	// right now". NTFS then allocates and zero-fills the whole extent,
+	// so every open pays for map_size in full.
+	//
+	// The consequence falls on anything that opens many short-lived
+	// stores, which in practice means test suites: at the 1 GiB default
+	// a Windows CI job spends minutes materializing files it never
+	// writes to, where the same job on Linux spends seconds. A harness
+	// that opens a store per test should pass a small map_size rather
+	// than take this default (STORE-T-0033).
 	map_size:    uint,
 	max_readers: u32,
 	// Trades durability for write speed: a crash may lose recent

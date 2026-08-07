@@ -481,3 +481,30 @@ the duplication they actually produce, and sequenced wherever it is convenient.
   **To close:** push all three repos and confirm CI green on Linux, macOS and Windows at both
   widths with the recorded counts (store 64 → 58, the −6 named and justified in T-0028); tag
   v0.2.0; then take the two sibling README lines. The remaining six exit criteria are met.
+- **2026-08-07 — Pushed; CI green on all three platforms. Exit criterion 3 is met for this
+  repo.** Run `31217331487` (`282b18e`): ubuntu-latest, windows-latest and macos-latest all
+  success, vet plus tests at both `Term_ID` widths. This is the first CI this repo has seen
+  since `f896b7b` on 2026-08-06, so it covers the whole retirement sequence at once --
+  STORE-T-0025 and T-0028 through T-0032. Windows, the platform the Testing Strategy singled
+  out because kvstore tests do filesystem work, passed in 57s.
+
+  **Final counts, per width: store 5, store/kvstore 33, tests/readme 2 = 40**, identical on
+  all three platforms. The arithmetic across the initiative, since the raw total fell and the
+  criterion asks for a justification of any reduction:
+
+  | | store | memstore | kvstore | conformance | readme | total |
+  |---|---:|---:|---:|---:|---:|---:|
+  | before | 5 | 17 | 29 | 10 | 3 | **64** |
+  | after T-0028 | 5 | 17 | 33 | 0 | 3 | **58** |
+  | after T-0030 | 5 | — | 33 | 0 | 2 | **40** |
+
+  Every unit of the 64 → 40 drop is memstore's own tests leaving with memstore: the redundant
+  conformance instantiation (−6, the 4 round-trip tests moved into kvstore intact rather than
+  being deleted), the memstore package's own 17, and the memstore quick start in
+  `tests/readme` (−1). **No assertion was rewritten and no kvstore coverage was lost** —
+  kvstore went 29 → 33. Coverage against the surviving backend is strictly greater than
+  before, which is what the criterion was protecting.
+
+  Criterion 3 is met **for odin-rdf-store only**. It reads "per repo", and odin-rdf-sparql
+  (3 commits) and odin-rdf-shacl (5 commits) are still unpushed, so their ports remain
+  verified on local darwin_arm64 alone. Criterion 6 is unchanged and still deferred.
