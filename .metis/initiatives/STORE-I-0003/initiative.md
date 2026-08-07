@@ -449,4 +449,35 @@ the duplication they actually produce, and sequenced wherever it is convenient.
       be decomposed without a capability device.
 - [ ] Exactly one of the two outstanding edits to STORE-A-0002 has been applied — this
       initiative's demonstration-claim change — and the archived ADR's capability-tier
-      amendment has not.
+      amendment has not.- **2026-08-07 — All eight tasks completed; the initiative stays active. Two exit criteria
+  are open, and neither can be closed by writing a document.**
+
+  STORE-T-0031 and STORE-T-0032 completed, which finishes the decomposition: T-0025 (ADR +
+  vision retraction), T-0026 / T-0027 (sibling proposals, filed and since completed in those
+  repos as SPARQL-T-0023 and SHACL-T-0028), T-0028 (own suite), T-0029 (benchmarks), T-0030
+  (deletion), T-0031 (docs + release), T-0032 (the transaction ADR, written as STORE-A-0007).
+
+  **Exit criterion 3 — "test counts … at both `Term_ID` widths, on all three CI platforms" —
+  is unverified, and the reason is that none of this work has been pushed.** All three repos
+  are ahead of `origin/main` with the entire retirement sequence sitting locally: 8 commits
+  here, 3 in odin-rdf-sparql, 5 in odin-rdf-shacl. The most recent CI run in each repo
+  predates every one of them — odin-rdf-store's newest is `f896b7b` (2026-08-06), before
+  T-0028 and T-0030 existed. So the ports are green on **local darwin_arm64 only**, which
+  STORE-T-0028's status update already said in as many words.
+
+  This is the risk the Testing Strategy named specifically: "CI on three operating systems is
+  where the port's cost actually lands: kvstore tests do filesystem work, and Windows is the
+  least-exercised platform." Every ported test now touches the filesystem where its memstore
+  predecessor did not, and the temp-path dance differs on Windows. Pushing is the verification
+  step, and it has not happened.
+
+  **Exit criterion 6 — "documentation across all three repos and the shared `CLAUDE.md`
+  describes one backend" — is open by decision, not by oversight.** The store repo and the
+  checkout-root `CLAUDE.md` are done. Two summary lines near the top of the sibling READMEs
+  still count two backends (odin-rdf-sparql's "run against **both** storage backends",
+  odin-rdf-shacl's "against both storage backends"); both bodies are already correct and cite
+  STORE-A-0006. Greger deferred these to after odin-rdf-store v0.2.0 ships.
+
+  **To close:** push all three repos and confirm CI green on Linux, macOS and Windows at both
+  widths with the recorded counts (store 64 → 58, the −6 named and justified in T-0028); tag
+  v0.2.0; then take the two sibling README lines. The remaining six exit criteria are met.
