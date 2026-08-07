@@ -1,6 +1,5 @@
 package kvstore
 
-import "base:runtime"
 import "core:encoding/endian"
 import "core:hash/xxhash"
 import "core:strings"
@@ -63,47 +62,47 @@ term2id_key :: proc(buf: []u8, kind: store.Term_Kind, canonical: []u8) {
 	}
 }
 
-// intern_term interns a term in its own write transaction; see
-// intern_term_txn for the transactional form the loaders use.
+// intern_term interns a term, assigning a fresh dense ID on first
+// sight. Autocommit: a write transaction of its own, one operation,
+// closed. Fails with .Write_Txn_Open if the caller already holds a
+// write transaction — see intern_term_txn for that case.
 intern_term :: proc(s: ^Store, term: rdf.Term) -> (id: store.Term_ID, err: Error) {
-	txn: ^lmdb.Txn
-	check(lmdb.txn_begin(s.env, nil, 0, &txn)) or_return
-	committed := false
-	defer if !committed {
-		lmdb.txn_abort(txn)
-	}
-	id = intern_term_txn(s, txn, term) or_return
-	check(lmdb.txn_commit(txn)) or_return
-	committed = true
+	tx := txn_begin(s, .Write) or_return
+	defer txn_abort(&tx)
+	id = intern_term_txn(&tx, term) or_return
+	txn_commit(&tx) or_return
 	return id, nil
 }
 
 // intern_term_txn interns a term (recursively for RDF-star triple
-// terms) inside a caller-owned write transaction, assigning a fresh
-// dense ID on first sight. Nothing borrowed from the caller's term
-// survives: canonical bytes are written into LMDB pages.
-intern_term_txn :: proc(s: ^Store, txn: ^lmdb.Txn, term: rdf.Term) -> (id: store.Term_ID, err: Error) {
+// terms) through the caller's write transaction. Nothing borrowed from
+// the caller's term survives: canonical bytes are written into storage.
+//
+// The ID is **provisional until the transaction commits** — on abort
+// the caller must discard it. Whether the term stays interned after an
+// abort is deliberately unspecified (store/interface.odin).
+intern_term_txn :: proc(t: ^Txn, term: rdf.Term) -> (id: store.Term_ID, err: Error) {
 	switch v in term {
 	case rdf.IRI:
-		return intern_canonical(s, txn, .IRI, transmute([]u8)string(v))
+		return intern_canonical(t, .IRI, transmute([]u8)string(v))
 
 	case rdf.Blank_Node:
-		return intern_canonical(s, txn, .Blank_Node, transmute([]u8)string(v))
+		return intern_canonical(t, .Blank_Node, transmute([]u8)string(v))
 
 	case rdf.Literal:
 		if len(v.language) > 255 {
 			return 0, .Language_Too_Long
 		}
-		dt := intern_canonical(s, txn, .IRI, transmute([]u8)string(v.datatype)) or_return
-		return intern_canonical(s, txn, .Literal, literal_canonical(dt, v))
+		dt := intern_canonical(t, .IRI, transmute([]u8)string(v.datatype)) or_return
+		return intern_canonical(t, .Literal, literal_canonical(dt, v))
 
 	case ^rdf.Triple:
 		assert(v != nil, "intern_term_txn: nil triple term")
 		components: [3]store.Term_ID
-		components[0] = intern_term_txn(s, txn, v.subject) or_return
-		components[1] = intern_term_txn(s, txn, v.predicate) or_return
-		components[2] = intern_term_txn(s, txn, v.object) or_return
-		return intern_triple_ids_txn(s, txn, components)
+		components[0] = intern_term_txn(t, v.subject) or_return
+		components[1] = intern_term_txn(t, v.predicate) or_return
+		components[2] = intern_term_txn(t, v.object) or_return
+		return intern_triple_ids_txn(t, components)
 	}
 	panic("intern_term_txn: nil term")
 }
@@ -140,17 +139,10 @@ triple_canonical :: proc(buf: []u8, components: [3]store.Term_ID) {
 // callers that map components themselves (the loaders' blank-node
 // scoping).
 @(private)
-intern_triple_ids_txn :: proc(
-	s: ^Store,
-	txn: ^lmdb.Txn,
-	components: [3]store.Term_ID,
-) -> (
-	id: store.Term_ID,
-	err: Error,
-) {
+intern_triple_ids_txn :: proc(t: ^Txn, components: [3]store.Term_ID) -> (id: store.Term_ID, err: Error) {
 	canonical: [3 * ID_SIZE]u8
 	triple_canonical(canonical[:], components)
-	return intern_canonical(s, txn, .Triple, canonical[:])
+	return intern_canonical(t, .Triple, canonical[:])
 }
 
 // probe_canonical is the verified term2id lookup of STORE-A-0003 §4:
@@ -160,8 +152,7 @@ intern_triple_ids_txn :: proc(
 // Read-only — the lookup half shared by intern_canonical and find_term.
 @(private)
 probe_canonical :: proc(
-	s: ^Store,
-	txn: ^lmdb.Txn,
+	t: ^Txn,
 	kind: store.Term_Kind,
 	canonical: []u8,
 ) -> (
@@ -174,14 +165,14 @@ probe_canonical :: proc(
 	key := val_of(key_buf[:])
 
 	data: lmdb.Val
-	rc := lmdb.get(txn, s.dbi[.Term2id], &key, &data)
+	rc := lmdb.get(t.txn, t.s.dbi[.Term2id], &key, &data)
 	if rc == lmdb.NOTFOUND {
 		return 0, false, nil
 	}
 	check(rc) or_return
 
 	candidate := get_id_be(val_bytes(data))
-	stored := id2term_get(s, txn, candidate) or_return
+	stored := id2term_get(t, candidate) or_return
 	if string(stored) != string(canonical) {
 		// Distinct content behind the same 128-bit key: the
 		// detected-and-rejected path (format v2 would chain here).
@@ -195,19 +186,19 @@ probe_canonical :: proc(
 // persisted in the same transaction.
 @(private)
 intern_canonical :: proc(
-	s: ^Store,
-	txn: ^lmdb.Txn,
+	t: ^Txn,
 	kind: store.Term_Kind,
 	canonical: []u8,
 ) -> (
 	id: store.Term_ID,
 	err: Error,
 ) {
-	existing, found := probe_canonical(s, txn, kind, canonical) or_return
+	existing, found := probe_canonical(t, kind, canonical) or_return
 	if found {
 		return existing, nil
 	}
 
+	s := t.s
 	counter := s.next[u8(kind)]
 	assert(counter <= store.MAX_COUNTER, "dictionary: per-kind term capacity exhausted")
 	id = store.make_id(kind, counter)
@@ -216,17 +207,20 @@ intern_canonical :: proc(
 	put_id_be(id_buf[:], id)
 	id_key := val_of(id_buf[:])
 	content := val_of(canonical)
-	check(lmdb.put(txn, s.dbi[.Id2term], &id_key, &content, 0)) or_return
+	check(lmdb.put(t.txn, s.dbi[.Id2term], &id_key, &content, 0)) or_return
 
 	key_buf: [TERM2ID_KEY_SIZE]u8
 	term2id_key(key_buf[:], kind, canonical)
 	key := val_of(key_buf[:])
 	id_val := val_of(id_buf[:])
-	check(lmdb.put(txn, s.dbi[.Term2id], &key, &id_val, 0)) or_return
+	check(lmdb.put(t.txn, s.dbi[.Term2id], &key, &id_val, 0)) or_return
 
+	// The mirror moves now; meta moves inside the transaction, so an
+	// abort rolls meta back and write_txn_abort puts the mirror back
+	// with it (txn.odin).
 	s.next[u8(kind)] = counter + 1
 	counter_keys := meta_counter_keys
-	meta_put(s, txn, counter_keys[u8(kind)], counter + 1) or_return
+	meta_put(s, t.txn, counter_keys[u8(kind)], counter + 1) or_return
 	return id, nil
 }
 
@@ -237,17 +231,16 @@ intern_canonical :: proc(
 // absent must neither grow the dictionary nor require a writable
 // environment. Works against a store opened read-only.
 find_term :: proc(s: ^Store, term: rdf.Term) -> (id: store.Term_ID, found: bool, err: Error) {
-	txn: ^lmdb.Txn
-	check(lmdb.txn_begin(s.env, nil, lmdb.RDONLY, &txn)) or_return
-	defer lmdb.txn_abort(txn)
-	return find_term_txn(s, txn, term)
+	tx := txn_begin(s, .Read) or_return
+	defer txn_abort(&tx)
+	return find_term_txn(&tx, term)
 }
 
-// find_term_txn is find_term inside a caller-owned transaction (read or
-// write), mirroring intern_term_txn minus every assignment.
+// find_term_txn is find_term through the caller's transaction, of
+// either mode, mirroring intern_term_txn minus every assignment.
+// Through a write transaction it sees that transaction's own interning.
 find_term_txn :: proc(
-	s: ^Store,
-	txn: ^lmdb.Txn,
+	t: ^Txn,
 	term: rdf.Term,
 ) -> (
 	id: store.Term_ID,
@@ -256,10 +249,10 @@ find_term_txn :: proc(
 ) {
 	switch v in term {
 	case rdf.IRI:
-		return probe_canonical(s, txn, .IRI, transmute([]u8)string(v))
+		return probe_canonical(t, .IRI, transmute([]u8)string(v))
 
 	case rdf.Blank_Node:
-		return probe_canonical(s, txn, .Blank_Node, transmute([]u8)string(v))
+		return probe_canonical(t, .Blank_Node, transmute([]u8)string(v))
 
 	case rdf.Literal:
 		if len(v.language) > 255 {
@@ -268,11 +261,11 @@ find_term_txn :: proc(
 			// absent, not the error interning would raise.
 			return 0, false, nil
 		}
-		dt, dt_found := probe_canonical(s, txn, .IRI, transmute([]u8)string(v.datatype)) or_return
+		dt, dt_found := probe_canonical(t, .IRI, transmute([]u8)string(v.datatype)) or_return
 		if !dt_found {
 			return 0, false, nil
 		}
-		return probe_canonical(s, txn, .Literal, literal_canonical(dt, v))
+		return probe_canonical(t, .Literal, literal_canonical(dt, v))
 
 	case ^rdf.Triple:
 		// Component-wise: a triple term whose parts are not all present
@@ -280,7 +273,7 @@ find_term_txn :: proc(
 		assert(v != nil, "find_term_txn: nil triple term")
 		components: [3]store.Term_ID
 		for part, i in ([3]rdf.Term{v.subject, v.predicate, v.object}) {
-			component, component_found := find_term_txn(s, txn, part) or_return
+			component, component_found := find_term_txn(t, part) or_return
 			if !component_found {
 				return 0, false, nil
 			}
@@ -288,42 +281,41 @@ find_term_txn :: proc(
 		}
 		canonical: [3 * ID_SIZE]u8
 		triple_canonical(canonical[:], components)
-		return probe_canonical(s, txn, .Triple, canonical[:])
+		return probe_canonical(t, .Triple, canonical[:])
 	}
 	panic("find_term_txn: nil term")
 }
 
 // id2term_get reads a term's canonical bytes; the slice is a view into
-// the mapped page, valid only within txn.
+// the mapped page, valid only within the transaction.
 @(private)
-id2term_get :: proc(s: ^Store, txn: ^lmdb.Txn, id: store.Term_ID) -> (canonical: []u8, err: Error) {
+id2term_get :: proc(t: ^Txn, id: store.Term_ID) -> (canonical: []u8, err: Error) {
 	id_buf: [ID_SIZE]u8
 	put_id_be(id_buf[:], id)
 	key := val_of(id_buf[:])
 	data: lmdb.Val
-	check(lmdb.get(txn, s.dbi[.Id2term], &key, &data)) or_return
+	check(lmdb.get(t.txn, t.s.dbi[.Id2term], &key, &data)) or_return
 	return val_bytes(data), nil
 }
 
 // intern_graph_label returns the ID for a quad's graph position: the
 // interned label, or DEFAULT_GRAPH for a nil label.
 intern_graph_label :: proc(s: ^Store, g: rdf.Graph_Label) -> (id: store.Term_ID, err: Error) {
-	switch v in g {
-	case rdf.IRI:
-		return intern_term(s, v)
-	case rdf.Blank_Node:
-		return intern_term(s, v)
-	}
-	return store.DEFAULT_GRAPH, nil
+	tx := txn_begin(s, .Write) or_return
+	defer txn_abort(&tx)
+	id = intern_graph_label_txn(&tx, g) or_return
+	txn_commit(&tx) or_return
+	return id, nil
 }
 
-@(private)
-intern_graph_label_txn :: proc(s: ^Store, txn: ^lmdb.Txn, g: rdf.Graph_Label) -> (id: store.Term_ID, err: Error) {
+// intern_graph_label_txn is intern_graph_label through the caller's
+// write transaction.
+intern_graph_label_txn :: proc(t: ^Txn, g: rdf.Graph_Label) -> (id: store.Term_ID, err: Error) {
 	switch v in g {
 	case rdf.IRI:
-		return intern_term_txn(s, txn, v)
+		return intern_term_txn(t, v)
 	case rdf.Blank_Node:
-		return intern_term_txn(s, txn, v)
+		return intern_term_txn(t, v)
 	}
 	return store.DEFAULT_GRAPH, nil
 }
@@ -331,11 +323,19 @@ intern_graph_label_txn :: proc(s: ^Store, txn: ^lmdb.Txn, g: rdf.Graph_Label) ->
 // find_graph_label is find_term for the graph position: a nil label is
 // always found, as DEFAULT_GRAPH.
 find_graph_label :: proc(s: ^Store, g: rdf.Graph_Label) -> (id: store.Term_ID, found: bool, err: Error) {
+	tx := txn_begin(s, .Read) or_return
+	defer txn_abort(&tx)
+	return find_graph_label_txn(&tx, g)
+}
+
+// find_graph_label_txn is find_graph_label through the caller's
+// transaction, of either mode.
+find_graph_label_txn :: proc(t: ^Txn, g: rdf.Graph_Label) -> (id: store.Term_ID, found: bool, err: Error) {
 	switch v in g {
 	case rdf.IRI:
-		return find_term(s, v)
+		return find_term_txn(t, v)
 	case rdf.Blank_Node:
-		return find_term(s, v)
+		return find_term_txn(t, v)
 	}
 	return store.DEFAULT_GRAPH, true, nil
 }
@@ -344,8 +344,8 @@ find_graph_label :: proc(s: ^Store, g: rdf.Graph_Label) -> (id: store.Term_ID, f
 // existing term, under a generated label ("b0", "b1", ...) skipping
 // any label already taken — the loaders' per-load scoping hook.
 @(private)
-fresh_blank_txn :: proc(s: ^Store, txn: ^lmdb.Txn) -> (id: store.Term_ID, err: Error) {
-	n := s.next[u8(store.Term_Kind.Blank_Node)]
+fresh_blank_txn :: proc(t: ^Txn) -> (id: store.Term_ID, err: Error) {
+	n := t.s.next[u8(store.Term_Kind.Blank_Node)]
 	label_buf: [24]u8
 	for {
 		label := format_blank_label(label_buf[:], n)
@@ -355,9 +355,9 @@ fresh_blank_txn :: proc(s: ^Store, txn: ^lmdb.Txn) -> (id: store.Term_ID, err: E
 		term2id_key(key_buf[:], .Blank_Node, canonical)
 		key := val_of(key_buf[:])
 		data: lmdb.Val
-		rc := lmdb.get(txn, s.dbi[.Term2id], &key, &data)
+		rc := lmdb.get(t.txn, t.s.dbi[.Term2id], &key, &data)
 		if rc == lmdb.NOTFOUND {
-			return intern_canonical(s, txn, .Blank_Node, canonical)
+			return intern_canonical(t, .Blank_Node, canonical)
 		}
 		check(rc) or_return
 		n += 1
@@ -387,23 +387,23 @@ format_blank_label :: proc(buf: []u8, n: u64) -> string {
 // every string into the given allocator: the result owns nothing of
 // the store and stays valid after the store closes.
 lookup_term :: proc(s: ^Store, id: store.Term_ID, allocator := context.allocator) -> (term: rdf.Term, err: Error) {
-	txn: ^lmdb.Txn
-	check(lmdb.txn_begin(s.env, nil, lmdb.RDONLY, &txn)) or_return
-	defer lmdb.txn_abort(txn)
-	return lookup_term_txn(s, txn, id, allocator)
+	tx := txn_begin(s, .Read) or_return
+	defer txn_abort(&tx)
+	return lookup_term_txn(&tx, id, allocator)
 }
 
-@(private)
+// lookup_term_txn is lookup_term through the caller's transaction. The
+// copy is made before the transaction ends, so the term outlives it —
+// and the store — exactly as lookup_term's does.
 lookup_term_txn :: proc(
-	s: ^Store,
-	txn: ^lmdb.Txn,
+	t: ^Txn,
 	id: store.Term_ID,
-	allocator: runtime.Allocator,
+	allocator := context.allocator,
 ) -> (
 	term: rdf.Term,
 	err: Error,
 ) {
-	canonical := id2term_get(s, txn, id) or_return
+	canonical := id2term_get(t, id) or_return
 	#partial switch store.id_kind(id) {
 	case .IRI:
 		return rdf.IRI(strings.clone(string(canonical), allocator)), nil
@@ -411,7 +411,7 @@ lookup_term_txn :: proc(
 		return rdf.Blank_Node(strings.clone(string(canonical), allocator)), nil
 	case .Literal:
 		dt := get_id_be(canonical[:ID_SIZE])
-		dt_bytes := id2term_get(s, txn, dt) or_return
+		dt_bytes := id2term_get(t, dt) or_return
 		direction := rdf.Direction(canonical[ID_SIZE])
 		lang_len := int(canonical[ID_SIZE + 1])
 		lang := string(canonical[ID_SIZE + 2:][:lang_len])
@@ -425,9 +425,9 @@ lookup_term_txn :: proc(
 			nil
 	case .Triple:
 		node := new(rdf.Triple, allocator)
-		node.subject = lookup_term_txn(s, txn, get_id_be(canonical[0 * ID_SIZE:][:ID_SIZE]), allocator) or_return
-		node.predicate = lookup_term_txn(s, txn, get_id_be(canonical[1 * ID_SIZE:][:ID_SIZE]), allocator) or_return
-		node.object = lookup_term_txn(s, txn, get_id_be(canonical[2 * ID_SIZE:][:ID_SIZE]), allocator) or_return
+		node.subject = lookup_term_txn(t, get_id_be(canonical[0 * ID_SIZE:][:ID_SIZE]), allocator) or_return
+		node.predicate = lookup_term_txn(t, get_id_be(canonical[1 * ID_SIZE:][:ID_SIZE]), allocator) or_return
+		node.object = lookup_term_txn(t, get_id_be(canonical[2 * ID_SIZE:][:ID_SIZE]), allocator) or_return
 		return node, nil
 	}
 	panic("lookup_term: not a term ID")
@@ -439,7 +439,25 @@ lookup_graph_label :: proc(s: ^Store, id: store.Term_ID, allocator := context.al
 	if id == store.DEFAULT_GRAPH {
 		return nil, nil
 	}
-	term := lookup_term(s, id, allocator) or_return
+	tx := txn_begin(s, .Read) or_return
+	defer txn_abort(&tx)
+	return lookup_graph_label_txn(&tx, id, allocator)
+}
+
+// lookup_graph_label_txn is lookup_graph_label through the caller's
+// transaction.
+lookup_graph_label_txn :: proc(
+	t: ^Txn,
+	id: store.Term_ID,
+	allocator := context.allocator,
+) -> (
+	g: rdf.Graph_Label,
+	err: Error,
+) {
+	if id == store.DEFAULT_GRAPH {
+		return nil, nil
+	}
+	term := lookup_term_txn(t, id, allocator) or_return
 	#partial switch v in term {
 	case rdf.IRI:
 		return v, nil
@@ -449,50 +467,48 @@ lookup_graph_label :: proc(s: ^Store, id: store.Term_ID, allocator := context.al
 	panic("lookup_graph_label: not a graph label ID")
 }
 
-// encode_quad interns all four positions of a quad in one write
-// transaction.
+// encode_quad interns all four positions of a quad. Autocommit, so the
+// four are interned together or not at all.
 encode_quad :: proc(s: ^Store, q: rdf.Quad) -> (encoded: store.Encoded_Quad, err: Error) {
-	txn: ^lmdb.Txn
-	check(lmdb.txn_begin(s.env, nil, 0, &txn)) or_return
-	committed := false
-	defer if !committed {
-		lmdb.txn_abort(txn)
-	}
-	encoded = encode_quad_txn(s, txn, q) or_return
-	check(lmdb.txn_commit(txn)) or_return
-	committed = true
+	tx := txn_begin(s, .Write) or_return
+	defer txn_abort(&tx)
+	encoded = encode_quad_txn(&tx, q) or_return
+	txn_commit(&tx) or_return
 	return encoded, nil
 }
 
-@(private)
-encode_quad_txn :: proc(s: ^Store, txn: ^lmdb.Txn, q: rdf.Quad) -> (encoded: store.Encoded_Quad, err: Error) {
-	encoded[store.QUAD_S] = intern_term_txn(s, txn, q.subject) or_return
-	encoded[store.QUAD_P] = intern_term_txn(s, txn, q.predicate) or_return
-	encoded[store.QUAD_O] = intern_term_txn(s, txn, q.object) or_return
-	encoded[store.QUAD_G] = intern_graph_label_txn(s, txn, q.graph) or_return
+// encode_quad_txn is encode_quad through the caller's write
+// transaction: the four IDs are provisional until it commits.
+encode_quad_txn :: proc(t: ^Txn, q: rdf.Quad) -> (encoded: store.Encoded_Quad, err: Error) {
+	encoded[store.QUAD_S] = intern_term_txn(t, q.subject) or_return
+	encoded[store.QUAD_P] = intern_term_txn(t, q.predicate) or_return
+	encoded[store.QUAD_O] = intern_term_txn(t, q.object) or_return
+	encoded[store.QUAD_G] = intern_graph_label_txn(t, q.graph) or_return
 	return encoded, nil
 }
 
 // decode_quad materializes an encoded quad; see lookup_term for the
 // ownership contract.
 decode_quad :: proc(s: ^Store, q: store.Encoded_Quad, allocator := context.allocator) -> (decoded: rdf.Quad, err: Error) {
-	txn: ^lmdb.Txn
-	check(lmdb.txn_begin(s.env, nil, lmdb.RDONLY, &txn)) or_return
-	defer lmdb.txn_abort(txn)
+	tx := txn_begin(s, .Read) or_return
+	defer txn_abort(&tx)
+	return decode_quad_txn(&tx, q, allocator)
+}
 
-	decoded.subject = lookup_term_txn(s, txn, q[store.QUAD_S], allocator) or_return
-	decoded.predicate = lookup_term_txn(s, txn, q[store.QUAD_P], allocator) or_return
-	decoded.object = lookup_term_txn(s, txn, q[store.QUAD_O], allocator) or_return
-	if q[store.QUAD_G] == store.DEFAULT_GRAPH {
-		decoded.graph = nil
-	} else {
-		term := lookup_term_txn(s, txn, q[store.QUAD_G], allocator) or_return
-		#partial switch v in term {
-		case rdf.IRI:
-			decoded.graph = v
-		case rdf.Blank_Node:
-			decoded.graph = v
-		}
-	}
+// decode_quad_txn is decode_quad through the caller's transaction — all
+// four positions from one view of the dictionary, which is what a
+// consumer materializing a match result through its own snapshot wants.
+decode_quad_txn :: proc(
+	t: ^Txn,
+	q: store.Encoded_Quad,
+	allocator := context.allocator,
+) -> (
+	decoded: rdf.Quad,
+	err: Error,
+) {
+	decoded.subject = lookup_term_txn(t, q[store.QUAD_S], allocator) or_return
+	decoded.predicate = lookup_term_txn(t, q[store.QUAD_P], allocator) or_return
+	decoded.object = lookup_term_txn(t, q[store.QUAD_O], allocator) or_return
+	decoded.graph = lookup_graph_label_txn(t, q[store.QUAD_G], allocator) or_return
 	return decoded, nil
 }

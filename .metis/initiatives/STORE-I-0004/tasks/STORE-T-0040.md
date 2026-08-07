@@ -46,9 +46,13 @@ mid-transcription. Nothing is left to do for them here beyond not contradicting 
       transaction pins pages and grows the file against a concurrent writer; a long write
       transaction serializes every other writer against that environment. A consumer who reads
       only the README should not discover either in production.
-- [ ] **`CHANGELOG.md`** entry leading on what the release *adds* and stating plainly that it
-      breaks nothing — every bare procedure keeps its name, signature and semantics, and gains
-      a definition it did not have.
+- [ ] **`CHANGELOG.md`** entry leading on what the release *adds*, and stating the one small
+      thing it breaks rather than claiming it breaks nothing. Every *bare* procedure keeps its
+      name, signature and semantics. But `intern_term_txn` and `find_term_txn` were already
+      public with `^lmdb.Txn` in their signatures — public by omission, `find_term_txn` since
+      STORE-T-0014 — and both are re-signed to take `^Txn` (STORE-T-0036). No consumer anywhere
+      in the family uses either, so the reach is nil, but a changed public signature is a
+      changed public signature and the entry should say so.
 - [ ] **`store/kvstore`'s package doc comment** is updated: it currently describes the
       transaction behaviour as an implementation note ("insert commits its own write
       transaction; match opens a read transaction owned by the iterator"). That is now the

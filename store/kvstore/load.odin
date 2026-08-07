@@ -8,7 +8,6 @@ import quads_fmt "rdf:rdf/quads"
 import trig_fmt "rdf:rdf/trig"
 import triples_fmt "rdf:rdf/triples"
 import turtle_fmt "rdf:rdf/turtle"
-import lmdb "../../vendor/lmdb"
 import store ".."
 
 // Bulk ingestion into the persistent store, mirroring the semantics of
@@ -45,22 +44,20 @@ load_triples :: proc(
 	triples_fmt.parser_init(&p, source, allocator)
 	defer triples_fmt.parser_destroy(&p)
 
-	txn, scope := load_begin(s, allocator) or_return
+	tx, scope := load_begin(s, allocator) or_return
 	defer load_scope_destroy(&scope)
-	committed := false
-	defer if !committed {
-		write_txn_abort(s, txn)
-	}
+	// txn_commit zeroes the handle, so this aborts only if the commit
+	// below was not reached.
+	defer txn_abort(&tx)
 
-	target := intern_graph_label_txn(s, txn, graph) or_return
+	target := intern_graph_label_txn(&tx, graph) or_return
 	for t in triples_fmt.parser_next(&p) {
-		scope_insert_triple(s, txn, &scope, t, target) or_return
+		scope_insert_triple(&tx, &scope, t, target) or_return
 	}
 	if p.err.kind != .None {
 		return 0, load_parse_error(triples_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
 	}
-	write_txn_commit(s, txn) or_return
-	committed = true
+	txn_commit(&tx) or_return
 	return scope.added, {}, nil
 }
 
@@ -81,22 +78,20 @@ load_turtle :: proc(
 	turtle_fmt.parser_init(&p, source, base, allocator)
 	defer turtle_fmt.parser_destroy(&p)
 
-	txn, scope := load_begin(s, allocator) or_return
+	tx, scope := load_begin(s, allocator) or_return
 	defer load_scope_destroy(&scope)
-	committed := false
-	defer if !committed {
-		write_txn_abort(s, txn)
-	}
+	// txn_commit zeroes the handle, so this aborts only if the commit
+	// below was not reached.
+	defer txn_abort(&tx)
 
-	target := intern_graph_label_txn(s, txn, graph) or_return
+	target := intern_graph_label_txn(&tx, graph) or_return
 	for t in turtle_fmt.parser_next(&p) {
-		scope_insert_triple(s, txn, &scope, t, target) or_return
+		scope_insert_triple(&tx, &scope, t, target) or_return
 	}
 	if p.err.kind != .None {
 		return 0, load_parse_error(turtle_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
 	}
-	write_txn_commit(s, txn) or_return
-	committed = true
+	txn_commit(&tx) or_return
 	return scope.added, {}, nil
 }
 
@@ -115,21 +110,19 @@ load_quads :: proc(
 	quads_fmt.parser_init(&p, source, allocator)
 	defer quads_fmt.parser_destroy(&p)
 
-	txn, scope := load_begin(s, allocator) or_return
+	tx, scope := load_begin(s, allocator) or_return
 	defer load_scope_destroy(&scope)
-	committed := false
-	defer if !committed {
-		write_txn_abort(s, txn)
-	}
+	// txn_commit zeroes the handle, so this aborts only if the commit
+	// below was not reached.
+	defer txn_abort(&tx)
 
 	for q in quads_fmt.parser_next(&p) {
-		scope_insert_quad(s, txn, &scope, q) or_return
+		scope_insert_quad(&tx, &scope, q) or_return
 	}
 	if p.err.kind != .None {
 		return 0, load_parse_error(quads_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
 	}
-	write_txn_commit(s, txn) or_return
-	committed = true
+	txn_commit(&tx) or_return
 	return scope.added, {}, nil
 }
 
@@ -149,21 +142,19 @@ load_trig :: proc(
 	trig_fmt.parser_init(&p, source, base, allocator)
 	defer trig_fmt.parser_destroy(&p)
 
-	txn, scope := load_begin(s, allocator) or_return
+	tx, scope := load_begin(s, allocator) or_return
 	defer load_scope_destroy(&scope)
-	committed := false
-	defer if !committed {
-		write_txn_abort(s, txn)
-	}
+	// txn_commit zeroes the handle, so this aborts only if the commit
+	// below was not reached.
+	defer txn_abort(&tx)
 
 	for q in trig_fmt.parser_next(&p) {
-		scope_insert_quad(s, txn, &scope, q) or_return
+		scope_insert_quad(&tx, &scope, q) or_return
 	}
 	if p.err.kind != .None {
 		return 0, load_parse_error(trig_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
 	}
-	write_txn_commit(s, txn) or_return
-	committed = true
+	txn_commit(&tx) or_return
 	return scope.added, {}, nil
 }
 
@@ -187,11 +178,11 @@ Load_Scope :: struct {
 // LMDB's writer lock. The claim is released by write_txn_commit or
 // write_txn_abort, which every loader below reaches on both paths.
 @(private)
-load_begin :: proc(s: ^Store, allocator: runtime.Allocator) -> (txn: ^lmdb.Txn, scope: Load_Scope, err: Error) {
-	txn = write_txn_begin(s) or_return
+load_begin :: proc(s: ^Store, allocator: runtime.Allocator) -> (tx: Txn, scope: Load_Scope, err: Error) {
+	tx = txn_begin(s, .Write) or_return
 	scope.allocator = allocator
 	scope.blanks = make(map[string]store.Term_ID, 8, allocator)
-	return txn, scope, nil
+	return tx, scope, nil
 }
 
 @(private)
@@ -204,11 +195,11 @@ load_scope_destroy :: proc(scope: ^Load_Scope) {
 }
 
 @(private)
-scope_blank :: proc(s: ^Store, txn: ^lmdb.Txn, scope: ^Load_Scope, label: string) -> (id: store.Term_ID, err: Error) {
+scope_blank :: proc(t: ^Txn, scope: ^Load_Scope, label: string) -> (id: store.Term_ID, err: Error) {
 	if existing, ok := scope.blanks[label]; ok {
 		return existing, nil
 	}
-	id = fresh_blank_txn(s, txn) or_return
+	id = fresh_blank_txn(t) or_return
 	// The label is borrowed from the current parser statement; clone it
 	// for the scope map, which outlives the statement.
 	scope.blanks[strings.clone(label, scope.allocator)] = id
@@ -219,27 +210,26 @@ scope_blank :: proc(s: ^Store, txn: ^lmdb.Txn, scope: ^Load_Scope, label: string
 // applied, recursing into RDF-star triple terms so blank nodes inside
 // them are scoped too.
 @(private)
-scope_term :: proc(s: ^Store, txn: ^lmdb.Txn, scope: ^Load_Scope, term: rdf.Term) -> (id: store.Term_ID, err: Error) {
+scope_term :: proc(t: ^Txn, scope: ^Load_Scope, term: rdf.Term) -> (id: store.Term_ID, err: Error) {
 	switch v in term {
 	case rdf.IRI, rdf.Literal:
-		return intern_term_txn(s, txn, term)
+		return intern_term_txn(t, term)
 	case rdf.Blank_Node:
-		return scope_blank(s, txn, scope, string(v))
+		return scope_blank(t, scope, string(v))
 	case ^rdf.Triple:
 		assert(v != nil, "scope_term: nil triple term")
 		components: [3]store.Term_ID
-		components[0] = scope_term(s, txn, scope, v.subject) or_return
-		components[1] = scope_term(s, txn, scope, v.predicate) or_return
-		components[2] = scope_term(s, txn, scope, v.object) or_return
-		return intern_triple_ids_txn(s, txn, components)
+		components[0] = scope_term(t, scope, v.subject) or_return
+		components[1] = scope_term(t, scope, v.predicate) or_return
+		components[2] = scope_term(t, scope, v.object) or_return
+		return intern_triple_ids_txn(t, components)
 	}
 	panic("scope_term: nil term")
 }
 
 @(private)
 scope_insert_triple :: proc(
-	s: ^Store,
-	txn: ^lmdb.Txn,
+	tx: ^Txn,
 	scope: ^Load_Scope,
 	t: rdf.Triple,
 	target: store.Term_ID,
@@ -247,11 +237,11 @@ scope_insert_triple :: proc(
 	err: Error,
 ) {
 	q: store.Encoded_Quad
-	q[store.QUAD_S] = scope_term(s, txn, scope, t.subject) or_return
-	q[store.QUAD_P] = scope_term(s, txn, scope, t.predicate) or_return
-	q[store.QUAD_O] = scope_term(s, txn, scope, t.object) or_return
+	q[store.QUAD_S] = scope_term(tx, scope, t.subject) or_return
+	q[store.QUAD_P] = scope_term(tx, scope, t.predicate) or_return
+	q[store.QUAD_O] = scope_term(tx, scope, t.object) or_return
 	q[store.QUAD_G] = target
-	added := insert_txn(s, txn, q) or_return
+	added := insert_txn(tx, q) or_return
 	if added {
 		scope.added += 1
 	}
@@ -259,23 +249,23 @@ scope_insert_triple :: proc(
 }
 
 @(private)
-scope_insert_quad :: proc(s: ^Store, txn: ^lmdb.Txn, scope: ^Load_Scope, q: rdf.Quad) -> (err: Error) {
+scope_insert_quad :: proc(t: ^Txn, scope: ^Load_Scope, q: rdf.Quad) -> (err: Error) {
 	graph: store.Term_ID
 	switch v in q.graph {
 	case rdf.IRI:
-		graph = intern_term_txn(s, txn, v) or_return
+		graph = intern_term_txn(t, v) or_return
 	case rdf.Blank_Node:
-		graph = scope_blank(s, txn, scope, string(v)) or_return
+		graph = scope_blank(t, scope, string(v)) or_return
 	case:
 		graph = store.DEFAULT_GRAPH
 	}
 
 	encoded: store.Encoded_Quad
-	encoded[store.QUAD_S] = scope_term(s, txn, scope, q.subject) or_return
-	encoded[store.QUAD_P] = scope_term(s, txn, scope, q.predicate) or_return
-	encoded[store.QUAD_O] = scope_term(s, txn, scope, q.object) or_return
+	encoded[store.QUAD_S] = scope_term(t, scope, q.subject) or_return
+	encoded[store.QUAD_P] = scope_term(t, scope, q.predicate) or_return
+	encoded[store.QUAD_O] = scope_term(t, scope, q.object) or_return
 	encoded[store.QUAD_G] = graph
-	added := insert_txn(s, txn, encoded) or_return
+	added := insert_txn(t, encoded) or_return
 	if added {
 		scope.added += 1
 	}

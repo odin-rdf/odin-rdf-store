@@ -316,22 +316,23 @@ test_dict_find_term_in_write_txn :: proc(t: ^testing.T) {
 	s := scratch_store()
 	defer close(s)
 
-	txn: ^lmdb.Txn
-	testing.expect_value(t, lmdb.txn_begin(s.env, nil, 0, &txn), i32(lmdb.SUCCESS))
+	tx, terr := txn_begin(s, .Write)
+	testing.expect(t, terr == nil)
+	defer txn_abort(&tx)
 
-	_, before, berr := find_term_txn(s, txn, rdf.IRI("http://example.org/a"))
+	_, before, berr := find_term_txn(&tx, rdf.IRI("http://example.org/a"))
 	testing.expect(t, berr == nil)
 	testing.expect_value(t, before, false)
 
-	interned, ierr := intern_term_txn(s, txn, rdf.IRI("http://example.org/a"))
+	interned, ierr := intern_term_txn(&tx, rdf.IRI("http://example.org/a"))
 	testing.expect(t, ierr == nil)
 
-	id, after, aerr := find_term_txn(s, txn, rdf.IRI("http://example.org/a"))
+	id, after, aerr := find_term_txn(&tx, rdf.IRI("http://example.org/a"))
 	testing.expect(t, aerr == nil)
 	testing.expect_value(t, after, true)
 	testing.expect_value(t, id, interned)
 
-	testing.expect_value(t, lmdb.txn_commit(txn), i32(lmdb.SUCCESS))
+	testing.expect(t, txn_commit(&tx) == nil)
 }
 
 @(test)
@@ -362,13 +363,14 @@ test_dict_fresh_blank :: proc(t: ^testing.T) {
 	// Take the "b0" label first, so fresh_blank must skip it.
 	taken, _ := intern_term(s, rdf.Blank_Node("b0"))
 
-	txn: ^lmdb.Txn
-	testing.expect_value(t, lmdb.txn_begin(s.env, nil, 0, &txn), i32(lmdb.SUCCESS))
-	f1, err1 := fresh_blank_txn(s, txn)
+	tx, terr := txn_begin(s, .Write)
+	testing.expect(t, terr == nil)
+	defer txn_abort(&tx)
+	f1, err1 := fresh_blank_txn(&tx)
 	testing.expect(t, err1 == nil)
-	f2, err2 := fresh_blank_txn(s, txn)
+	f2, err2 := fresh_blank_txn(&tx)
 	testing.expect(t, err2 == nil)
-	testing.expect_value(t, lmdb.txn_commit(txn), i32(lmdb.SUCCESS))
+	testing.expect(t, txn_commit(&tx) == nil)
 
 	testing.expect(t, f1 != taken)
 	testing.expect(t, f2 != taken)

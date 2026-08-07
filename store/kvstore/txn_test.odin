@@ -3,11 +3,11 @@ package kvstore
 // The Txn handle's own tests (STORE-T-0034): its lifecycle, the
 // single-writer refusal, and the counter-mirror invariant.
 //
-// The operations that take a ^Txn are not published yet — that is
-// STORE-T-0036 and T-0037 — so the tests below reach the private
-// (s, txn, …) internals through the handle's fields. That is
-// deliberately temporary: once insert_txn takes a ^Txn these become
-// insert_txn(&t, q) and stop looking through it.
+// These read as they should now that STORE-T-0036 has landed: the
+// _txn operations take the handle, so nothing here looks through it.
+// The one exception is persisted_counters, which reads meta directly —
+// deliberately, since it has to check the side of the invariant that
+// Store.next is supposed to mirror.
 
 import "core:testing"
 
@@ -48,7 +48,7 @@ test_txn_commit_makes_writes_visible :: proc(t: ^testing.T) {
 
 	tx, err := txn_begin(s, .Write)
 	testing.expect(t, err == nil)
-	added, ierr := insert_txn(tx.s, tx.txn, a_quad(s, 1))
+	added, ierr := insert_txn(&tx, a_quad(s, 1))
 	testing.expect(t, ierr == nil)
 	testing.expect_value(t, added, true)
 	testing.expect(t, txn_commit(&tx) == nil)
@@ -65,7 +65,7 @@ test_txn_abort_leaves_nothing :: proc(t: ^testing.T) {
 
 	tx, err := txn_begin(s, .Write)
 	testing.expect(t, err == nil)
-	_, ierr := insert_txn(tx.s, tx.txn, a_quad(s, 1))
+	_, ierr := insert_txn(&tx, a_quad(s, 1))
 	testing.expect(t, ierr == nil)
 	txn_abort(&tx)
 
@@ -104,7 +104,7 @@ test_txn_commit_on_a_read_transaction_is_legal :: proc(t: ^testing.T) {
 
 	tx, err := txn_begin(s, .Read)
 	testing.expect(t, err == nil)
-	testing.expect_value(t, tx.mode, Txn_Mode.Read)
+	testing.expect_value(t, tx.mode, store.Txn_Mode.Read)
 	testing.expect(t, txn_commit(&tx) == nil)
 
 	// The reader slot is released either way: another one opens.
@@ -170,10 +170,10 @@ test_txn_abort_restores_the_counter_mirror :: proc(t: ^testing.T) {
 	// so advancing only one counter would not prove the restore covers
 	// the array.
 	for iri in ([?]string{"http://example.org/g1", "http://example.org/g2", "http://example.org/g3"}) {
-		_, ierr := intern_term_txn(tx.s, tx.txn, rdf.IRI(iri))
+		_, ierr := intern_term_txn(&tx, rdf.IRI(iri))
 		testing.expect(t, ierr == nil)
 	}
-	_, ierr := intern_term_txn(tx.s, tx.txn, rdf.literal("gone", "en"))
+	_, ierr := intern_term_txn(&tx, rdf.literal("gone", "en"))
 	testing.expect(t, ierr == nil)
 	testing.expect(t, s.next != before, "interning must advance the mirror, or this test proves nothing")
 
@@ -216,7 +216,7 @@ test_txn_commit_keeps_the_counter_mirror :: proc(t: ^testing.T) {
 	before := s.next
 	tx, err := txn_begin(s, .Write)
 	testing.expect(t, err == nil)
-	_, ierr := intern_term_txn(tx.s, tx.txn, rdf.IRI("http://example.org/kept"))
+	_, ierr := intern_term_txn(&tx, rdf.IRI("http://example.org/kept"))
 	testing.expect(t, ierr == nil)
 	testing.expect(t, txn_commit(&tx) == nil)
 
@@ -233,7 +233,7 @@ test_write_on_a_read_transaction_fails_cleanly :: proc(t: ^testing.T) {
 
 	tx, err := txn_begin(s, .Read)
 	testing.expect(t, err == nil)
-	_, ierr := insert_txn(tx.s, tx.txn, a_quad(s, 1))
+	_, ierr := insert_txn(&tx, a_quad(s, 1))
 	testing.expect(t, ierr != nil)
 	txn_abort(&tx)
 

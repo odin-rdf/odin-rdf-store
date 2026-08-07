@@ -14,19 +14,7 @@
 package kvstore
 
 import lmdb "../../vendor/lmdb"
-
-// Txn_Mode is what a transaction may do. The distinction is checked at
-// runtime rather than in the type: a write operation attempted on a
-// .Read transaction fails with LMDB's own error rather than corrupting
-// anything.
-Txn_Mode :: enum {
-	// A stable view of the dataset. Concurrent commits do not disturb
-	// it. This is the snapshot.
-	Read,
-	// A view that can be written, and whose own uncommitted writes its
-	// reads observe. At most one is open on a Store at a time.
-	Write,
-}
+import store ".."
 
 // Txn is an open transaction on a Store, and it carries its dataset:
 // every transactional procedure takes ^Txn alone, never (s, txn).
@@ -46,7 +34,7 @@ Txn_Mode :: enum {
 Txn :: struct {
 	s:    ^Store,
 	txn:  ^lmdb.Txn,
-	mode: Txn_Mode,
+	mode: store.Txn_Mode,
 }
 
 // txn_begin opens a transaction on the store.
@@ -84,7 +72,7 @@ Txn :: struct {
 //
 // No allocator parameter, for the reason match has none: a Txn owns no
 // memory.
-txn_begin :: proc(s: ^Store, mode: Txn_Mode) -> (t: Txn, err: Error) {
+txn_begin :: proc(s: ^Store, mode: store.Txn_Mode) -> (t: Txn, err: Error) {
 	t.s = s
 	t.mode = mode
 	switch mode {
