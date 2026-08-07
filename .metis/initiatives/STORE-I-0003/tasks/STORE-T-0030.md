@@ -4,14 +4,14 @@ level: task
 title: "Delete store/memstore"
 short_code: "STORE-T-0030"
 created_at: 2026-08-07T16:22:26+00:00
-updated_at: 2026-08-07T20:00:21.276868+00:00
+updated_at: 2026-08-07T20:02:59.522006+00:00
 parent: STORE-I-0003
 blocked_by: [STORE-T-0026, STORE-T-0027, STORE-T-0028, STORE-T-0029]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -33,6 +33,8 @@ building.
 
 832 lines of code and 601 lines of tests, in `store/memstore/{memstore,dictionary,dataset,index,load}.odin`
 and their `_test` siblings.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
