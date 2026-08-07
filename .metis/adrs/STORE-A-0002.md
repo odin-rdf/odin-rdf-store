@@ -77,6 +77,22 @@ The match interface is a **documented procedure-set convention enforced by a sha
 
 - **2026-08-04**: With the second backend implemented, the shared vocabulary (Term_ID encoding, Encoded_Quad, Match_Pattern, the contract document, Load_Error) moved from the in-memory package into a dedicated core package `store`, with the backends as subdirectory packages `store/memstore` and `store/kvstore` — peers of one interface (STORE-T-0013). This supersedes point 2's placement ("the in-memory package's doc comment"): the contract now lives in `store/interface.odin`. The decision itself — procedure-set convention enforced by the shared conformance suite — is unchanged, and was validated by the kvstore backend passing the suite verbatim.
 
+- **2026-08-07**: memstore is retired and odin-rdf-store becomes a single-backend library
+  over LMDB (STORE-A-0006, STORE-I-0003). This qualifies **point 3's premise, not its
+  mechanism**: the shared conformance suite is still the enforcement mechanism and passing
+  it is still the definition of implementing the interface, but "structured so a new backend
+  runs the identical suite" is now a provision for a hypothetical backend rather than a
+  description of what happens on every run. The suite becomes a regression suite rather than
+  a portability proof, and the `Backend` adapter is retained precisely so that reverts when a
+  second backend arrives. The decision itself — procedure-set convention, no vtable — and
+  points 1, 2, 4, 5, and 6 are unchanged; point 4's vtable question is if anything further
+  from needing an answer.
+
+  *(A different amendment to this point was drafted in STORE-A-0005, qualifying it for a
+  conformance suite that branches on declared backend capabilities. That ADR is archived
+  undecided and its amendment is void: with one backend there are no branches. The two were
+  mutually exclusive and this is the one that applies.)*
+
 ## Review Schedule **[CONDITIONAL: Temporary Decision]**
 
 ### Review Triggers

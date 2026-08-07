@@ -122,6 +122,16 @@ Milestone ordering note: steps 2–3 can proceed in parallel with the ADRs for s
 - **2026-08-04 — Decomposed into 6 tasks**: STORE-T-0001 (Term_ID encoding + dual-width CI) → STORE-T-0002 (term dictionary) → STORE-T-0003 (match contract, naive dataset, conformance suite) → then STORE-T-0004 (permutation indexes) and STORE-T-0005 (parser bulk ingestion) in parallel → STORE-T-0006 (round-trip, benchmark, docs, close-out). Dependencies recorded in each task's `blocked_by` frontmatter. Awaiting human review before activation.
 - **2026-08-04 — All 6 tasks completed.** The library exists: `store/` package (Term_ID encoding, dictionary, indexed dataset behind the match interface, four-format bulk load), `bench/` harness, `scripts/test.sh` dual-width runner. 30 tests green at both widths. One design revision during execution, made on evidence exactly as decision 3 planned: the benchmark exposed per-insert sorted-array injection as O(n²) in bulk load (~19k stmt/s at 200k distinct quads), so the dataset moved to hash-set membership + pending buffer + lazy sort/merge into the indexes on first match — the conformance suite passed unchanged (the interface abstracted correctly), and bulk load reached ~600k stmt/s including index construction.
 - **Benchmark baselines (2026-08-04, Apple Silicon macOS, `odin run bench -o:speed`, 200k statements, load + index build):** 64-bit IDs — N-Triples 584 kstmt/s @ 580 B/stmt live, N-Triples escaped 588 kstmt/s @ 650 B/stmt, N-Quads 607 kstmt/s @ 649 B/stmt, Turtle 1188 kstmt/s (corpus dedupes to 3k distinct quads), TriG 1063 kstmt/s. 32-bit IDs — N-Triples 614 kstmt/s @ 461 B/stmt, N-Quads 651 kstmt/s @ 527 B/stmt (~20% less live memory, slightly faster). B/stmt counts dictionary strings + maps + membership set + three indexes on an all-distinct corpus (worst case for interning).
+- **2026-08-07 — The reference implementation this initiative built is retired** (STORE-A-0006,
+  STORE-I-0003). memstore was the backend the match interface was defined against: the contract
+  document lived in its package doc until STORE-T-0013 moved it to `store/interface.odin`, and
+  the conformance suite was written against it before kvstore existed. That history stands as
+  written above, and the outcome is the one the arrangement was for — **the interface outlived
+  its reference**, and kvstore passed the suite verbatim without changing it. What is retired is
+  the second implementation, not the work that produced the contract. This initiative's exit
+  criteria were met when they were met and are not reopened; the benchmark baselines recorded
+  above are annotated separately by STORE-T-0029 as measured against a backend that no longer
+  exists.
 
 ## Exit Criteria **[REQUIRED]**
 

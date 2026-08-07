@@ -20,7 +20,7 @@ initiative_id: NULL
 
 ## Purpose
 
-Provide the Odin RDF family with its queryable storage layer: an RDF quad store that sits between odin-rdf-parser (parsing/serialization) and the future query and validation engines (odin-rdf-sparql, odin-rdf-shacl). This project defines the graph/dataset **match interface** those engines consume and ships its reference implementations — in-memory first, LMDB-backed later.
+Provide the Odin RDF family with its queryable storage layer: an RDF quad store that sits between odin-rdf-parser (parsing/serialization) and the future query and validation engines (odin-rdf-sparql, odin-rdf-shacl). This project defines the graph/dataset **match interface** those engines consume and ships its implementation, LMDB-backed. *(Historically two: an in-memory reference implementation came first and was retired 2026-08-07 — STORE-A-0006.)*
 
 Sequencing rationale (settled in the odin-rdf-parser sessions, 2026-08-04): a SPARQL engine's core loop is joins over `match(subject, predicate, object, graph)` with wildcards — that operation is this library's API. The storage abstraction lives low and engines depend downward on it (the Jena DatasetGraph / RDF4J SAIL / Oxigraph arrangement), so SHACL can later stand on the same interface without dragging in a query engine.
 
@@ -32,13 +32,15 @@ odin-rdf-store is a library (not an application) targeting Odin developers who b
 - **A match interface**: indexed lookup of quads where any of subject/predicate/object/graph may be a wildcard, returning streaming iterators. This interface is the contract downstream engines program against.
 - **Term storage**: a term dictionary with interning and stable term identifiers, so matching and joins compare small IDs rather than strings.
 - **Bulk ingestion and export** via odin-rdf-parser: load any of the four supported formats into a dataset, export a dataset through the emitters.
-- **Multiple backends of one interface**: an in-memory reference implementation first; an LMDB-backed persistent implementation later, exploiting LMDB's zero-copy read semantics (the discipline odin-rdf-parser's ADR RDF-A-0001 was designed around).
+- **One backend, behind an interface that permits others**: an LMDB-backed persistent implementation, exploiting LMDB's zero-copy read semantics (the discipline odin-rdf-parser's ADR RDF-A-0001 was designed around). The match interface is a documented procedure-set convention (STORE-A-0002), so a second backend remains a package away — but none is shipped and none has been asked for (STORE-A-0006, 2026-08-07).
 
 The library is deliberately low-level: it supplies the storage primitives on which SPARQL evaluation, SHACL validation, and application-level tooling are built. Query languages, inference, and validation logic are out of scope — they are consumers.
 
 ## Current State
 
 **Every success criterion is met (2026-08-06).** Both initiatives are complete. STORE-I-0001 delivered the term dictionary, the permutation-indexed in-memory dataset, and the match interface itself (STORE-A-0002); STORE-I-0002 delivered the persistent LMDB backend behind the same procedure set, with its on-disk format pinned in STORE-A-0003. One shared conformance suite — all 16 bound/wildcard pattern combinations, set semantics, default vs. named graphs, blank-node identity, RDF-star terms — passes **verbatim against both backends at both `Term_ID` widths**, which is what makes "multiple backends of one interface" a demonstration rather than a claim.
+
+> **Amendment, 2026-08-07 (STORE-A-0006 / STORE-I-0003): the in-memory backend is retired and this vision no longer claims multiple backends.** memstore was an architectural proposal that no consumer ever asked for, and the transaction model STORE-T-0019 and STORE-T-0022 require came out dominated by accommodating it. The paragraph above stands as the record of what was true on 2026-08-06 — the suite *did* pass verbatim against both backends, and that is what proved the contract abstracted correctly. What is retracted is the ongoing claim: the suite is now a regression suite over one backend rather than a portability proof, and the match interface's contract is LMDB's semantics by definition. The convention (STORE-A-0002) and the conformance `Backend` adapter are retained so a second backend can be added on evidence; the demonstration is what has ended, not the design that permits it.
 
 The interface has been proven by a real consumer: **odin-rdf-sparql** evaluates the full SPARQL algebra against it through the public contract alone, with no private hooks into either backend. It absorbed that use without redesign, and the capabilities it surfaced became seven backlog items rather than workarounds — the one interface revision this vision anticipated, arriving with evidence attached. `find_term` (STORE-T-0014) was the first, implemented in both backends before the engine needed it.
 
@@ -53,8 +55,7 @@ Outstanding work is growth, not debt: seven backlog items covering ordered itera
 A complete, well-tested Odin library where:
 
 - The match interface is stable and proven: odin-rdf-sparql evaluates basic graph patterns against it, and it accommodates what a query planner needs (ordered iteration, cardinality estimates) without redesign.
-- The in-memory implementation is the reference: correct set semantics, permutation indexes, competitive bulk-load throughput.
-- An LMDB-backed implementation provides persistence behind the same interface.
+- The LMDB-backed implementation provides persistence behind that interface: correct set semantics, permutation indexes, competitive bulk-load throughput. *(Until 2026-08-07 an in-memory implementation was the reference; STORE-A-0006 retired it.)*
 - Loading a document through odin-rdf-parser and exporting it back preserves data semantics, closing the parser vision's downstream-validation criterion.
 
 ## Major Features
@@ -64,15 +65,14 @@ A complete, well-tested Odin library where:
 - **Permutation indexes**: index layouts (e.g. SPO/POS/OSP and graph-aware variants) supporting wildcard match patterns with streaming iterators.
 - **Match interface**: the minimal contract engines consume — match with per-position wildcards, iteration, counts. Deliberately small in v1: match + insert + count; planner support (ordered iteration, cardinality estimates) added when the SPARQL engine demonstrates the need.
 - **Bulk load and export**: ingestion from all four odin-rdf-parser formats using the per-statement clone/intern discipline; export through the emitters.
-- **In-memory backend**: the reference implementation of the interface.
-- **LMDB backend (later phase)**: persistent implementation of the same interface with zero-copy reads.
+- **LMDB backend**: the implementation of the interface, persistent, with zero-copy reads. *(An in-memory backend was the original reference implementation and was retired 2026-08-07 — STORE-A-0006.)*
 
 ## Success Criteria
 
 - odin-rdf-sparql's basic graph pattern evaluation runs against the match interface without interface changes it cannot absorb.
 - Bulk ingestion via odin-rdf-parser works at scale and validates the parser's clone/intern contract in real use (this closes the open success criterion in the parser's vision RDF-V-0001).
 - Round-trip: load → match/export → compare preserves data semantics for all four formats.
-- The in-memory backend passes a store test suite covering set semantics, all match patterns, and dataset/graph edge cases (default vs. named graphs, blank node identity, RDF-star terms).
+- The backend passes a store test suite covering set semantics, all match patterns, and dataset/graph edge cases (default vs. named graphs, blank node identity, RDF-star terms). *(Met 2026-08-06 by both backends then shipped; reworded 2026-08-07 when the in-memory one was retired — STORE-A-0006. The suite and its `Backend` adapter are retained so a future backend meets the same criterion.)*
 - The public API is documented and idiomatic Odin, with the same contract-level documentation standard as odin-rdf-parser.
 
 ## Principles
@@ -85,7 +85,7 @@ A complete, well-tested Odin library where:
 
 ## Constraints
 
-- Written in Odin. The core library and the in-memory backend have no external dependencies; the LMDB backend is an isolated, optional package (it requires C bindings) that nothing else depends on.
+- Written in Odin. LMDB is the single external dependency, vendored as C sources and built per platform (STORE-A-0004). It is no longer optional: with the in-memory backend retired (STORE-A-0006), every consumer of this library links it, and every dataset is a filesystem path — LMDB has no anonymous or in-memory mode. The `store` vocabulary package itself still depends on nothing.
 - Depends on odin-rdf-parser for the data model, parsing, and serialization; its types (`rdf.Term`, `rdf.Triple`, `rdf.Quad`) are the interchange vocabulary.
 - Scope is limited to storage, indexing, and the match interface. SPARQL, SHACL, reasoners, and network/server layers are out of scope — they build on this library.
 - Persistence backends other than LMDB are out of scope for now.

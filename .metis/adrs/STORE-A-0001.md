@@ -46,7 +46,7 @@ Requirements gathered in the initiative's design discussion (2026-08-04):
 4. **No hardcoded widths**: tag shift, counter mask, per-kind capacity, and sentinels are all derived from `size_of(Term_ID)`. Code never mentions 32 or 64 outside the `when` block.
 5. **Both widths tested**: CI builds and runs the full test suite at both widths (exit criterion on STORE-I-0001).
 6. **LMDB key rule**: when IDs enter LMDB keys they are serialized **big-endian**, so memcmp order equals numeric ID order. No custom comparator. The LMDB metadata records the ID width the database was written with and refuses to open under a build of the other width — a width mismatch must be a loud open-time error, never silent corruption.
-7. **In-memory ordering matches**: the in-memory backend compares encoded quads positionally by numeric ID, so both backends produce identical iteration order if ordered iteration ever enters the planner contract.
+7. **In-memory ordering matches**: the in-memory backend compares encoded quads positionally by numeric ID, so both backends produce identical iteration order if ordered iteration ever enters the planner contract. *(Historical as of 2026-08-07: memstore is retired — STORE-A-0006. kvstore's numeric-ID iteration order stands on its own, falling out of the big-endian key rule in point 6, so this point's consequence for STORE-T-0015 is unaffected; only the cross-backend agreement it asserted is moot.)*
 8. **Triple terms intern recursively**: an RDF-star triple term's components are interned first; the triple term's own ID is a dense ID of kind "triple term" whose dictionary entry holds the three component IDs.
 
 ## Alternatives Analysis **[CONDITIONAL: Complex Decision]**
