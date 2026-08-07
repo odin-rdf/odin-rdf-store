@@ -96,6 +96,11 @@ Store_Error :: enum {
 	Hash_Collision,
 	// A literal's language tag exceeds the format's 255-byte field.
 	Language_Too_Long,
+	// A write transaction is already open on this Store, and a second
+	// would deadlock on LMDB's writer lock. A programming error rather
+	// than an environment failure, which is why it is a Store_Error;
+	// see txn_begin.
+	Write_Txn_Open,
 }
 
 // error_string renders a Db_Error via mdb_strerror; the result is
@@ -186,6 +191,13 @@ Store :: struct {
 	// write transaction as the entries they cover.
 	next:         [4]u64,
 	read_only:    bool,
+	// The single-writer claim (STORE-A-0007): whether this handle has a
+	// write transaction open, and what next was when it began. Every
+	// path that opens a write transaction goes through write_txn_begin,
+	// so a second one is refused rather than deadlocked and an abort
+	// leaves the mirror equal to the persisted counters. See txn.odin.
+	write_open:   bool,
+	write_next:   [4]u64,
 	// The file close must delete. Non-empty only for an ephemeral store
 	// on a platform with no unlink-while-open; everywhere else
 	// open_ephemeral unlinks before it returns and leaves this empty.
@@ -368,6 +380,11 @@ close :: proc(s: ^Store, allocator := context.allocator) {
 
 // open_databases opens the six named DBs and validates or initializes
 // the meta identity per STORE-A-0003 §1.
+//
+// This is the one write transaction that does not go through
+// write_txn_begin, and it does not need to: it runs inside open before
+// the Store has been handed to anyone, so there is no other holder to
+// refuse and no interning to roll back.
 @(private)
 open_databases :: proc(s: ^Store) -> (err: Error) {
 	txn_flags: u32 = s.read_only ? lmdb.RDONLY : 0

@@ -4,14 +4,14 @@ level: initiative
 title: "Transactions and snapshots: publish the handle"
 short_code: "STORE-I-0004"
 created_at: 2026-08-07T22:12:31.838098+00:00
-updated_at: 2026-08-07T22:14:41.125983+00:00
+updated_at: 2026-08-07T22:29:18.597489+00:00
 parent: STORE-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/decompose"
+  - "#phase/active"
 
 
 exit_criteria_met: false

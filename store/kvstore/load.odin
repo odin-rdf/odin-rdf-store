@@ -49,7 +49,7 @@ load_triples :: proc(
 	defer load_scope_destroy(&scope)
 	committed := false
 	defer if !committed {
-		lmdb.txn_abort(txn)
+		write_txn_abort(s, txn)
 	}
 
 	target := intern_graph_label_txn(s, txn, graph) or_return
@@ -59,7 +59,7 @@ load_triples :: proc(
 	if p.err.kind != .None {
 		return 0, load_parse_error(triples_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
 	}
-	check(lmdb.txn_commit(txn)) or_return
+	write_txn_commit(s, txn) or_return
 	committed = true
 	return scope.added, {}, nil
 }
@@ -85,7 +85,7 @@ load_turtle :: proc(
 	defer load_scope_destroy(&scope)
 	committed := false
 	defer if !committed {
-		lmdb.txn_abort(txn)
+		write_txn_abort(s, txn)
 	}
 
 	target := intern_graph_label_txn(s, txn, graph) or_return
@@ -95,7 +95,7 @@ load_turtle :: proc(
 	if p.err.kind != .None {
 		return 0, load_parse_error(turtle_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
 	}
-	check(lmdb.txn_commit(txn)) or_return
+	write_txn_commit(s, txn) or_return
 	committed = true
 	return scope.added, {}, nil
 }
@@ -119,7 +119,7 @@ load_quads :: proc(
 	defer load_scope_destroy(&scope)
 	committed := false
 	defer if !committed {
-		lmdb.txn_abort(txn)
+		write_txn_abort(s, txn)
 	}
 
 	for q in quads_fmt.parser_next(&p) {
@@ -128,7 +128,7 @@ load_quads :: proc(
 	if p.err.kind != .None {
 		return 0, load_parse_error(quads_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
 	}
-	check(lmdb.txn_commit(txn)) or_return
+	write_txn_commit(s, txn) or_return
 	committed = true
 	return scope.added, {}, nil
 }
@@ -153,7 +153,7 @@ load_trig :: proc(
 	defer load_scope_destroy(&scope)
 	committed := false
 	defer if !committed {
-		lmdb.txn_abort(txn)
+		write_txn_abort(s, txn)
 	}
 
 	for q in trig_fmt.parser_next(&p) {
@@ -162,7 +162,7 @@ load_trig :: proc(
 	if p.err.kind != .None {
 		return 0, load_parse_error(trig_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
 	}
-	check(lmdb.txn_commit(txn)) or_return
+	write_txn_commit(s, txn) or_return
 	committed = true
 	return scope.added, {}, nil
 }
@@ -181,9 +181,14 @@ Load_Scope :: struct {
 	added:     int,
 }
 
+// load_begin claims the environment's single writer for the length of
+// the document, so a loader called while the caller holds a write
+// transaction fails with .Write_Txn_Open rather than deadlocking on
+// LMDB's writer lock. The claim is released by write_txn_commit or
+// write_txn_abort, which every loader below reaches on both paths.
 @(private)
 load_begin :: proc(s: ^Store, allocator: runtime.Allocator) -> (txn: ^lmdb.Txn, scope: Load_Scope, err: Error) {
-	check(lmdb.txn_begin(s.env, nil, 0, &txn)) or_return
+	txn = write_txn_begin(s) or_return
 	scope.allocator = allocator
 	scope.blanks = make(map[string]store.Term_ID, 8, allocator)
 	return txn, scope, nil

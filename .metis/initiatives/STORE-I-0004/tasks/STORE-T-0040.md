@@ -70,6 +70,14 @@ mid-transcription. Nothing is left to do for them here beyond not contradicting 
 - [ ] **STORE-A-0007's Review Schedule is checked against what was actually built** and any
       trigger that fired during implementation is recorded there. In particular: whether a
       consumer wanted two simultaneous read views, and whether `mdb_txn_reset`/`renew` came up.
+- [ ] **STORE-A-0007 point 4's one factual drift is settled** — amend or leave, with the
+      reason. It says "`Txn` snapshots `next` at begin and restores it on abort"; STORE-T-0034
+      put the snapshot on the `Store` instead, because routing bare `insert` and the loaders
+      through the same single-writer claim left them with no `Txn` to hang one on — and the
+      loader-abort path is the one place the ADR itself says the drift is reachable. The
+      *guarantee* is unchanged and strictly wider; only the mechanism moved. A decided ADR
+      being slightly wrong about a mechanism is small, but it should be a decision rather than
+      an oversight.
 - [ ] CI green on Linux, macOS and Windows at both `Term_ID` widths, with test counts recorded
       before and after.
 

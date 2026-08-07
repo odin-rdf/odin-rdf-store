@@ -44,17 +44,23 @@ decode_quad_key :: proc(bytes: []u8, perm: [4]int) -> (q: store.Encoded_Quad) {
 	return q
 }
 
-// insert adds a quad in its own write transaction, returning whether
-// it was newly added (false: already present, nothing written).
+// insert adds a quad, returning whether it was newly added (false:
+// already present, nothing written).
+//
+// It is **autocommit**: a write transaction of its own, one operation,
+// closed — which is a definition now rather than merely how it happens
+// to work. It therefore claims the environment's single writer for the
+// length of the call, and fails with .Write_Txn_Open if the caller
+// already holds a write transaction. A caller that holds one wants
+// insert_txn (STORE-I-0004).
 insert :: proc(s: ^Store, q: store.Encoded_Quad) -> (added: bool, err: Error) {
-	txn: ^lmdb.Txn
-	check(lmdb.txn_begin(s.env, nil, 0, &txn)) or_return
+	txn := write_txn_begin(s) or_return
 	committed := false
 	defer if !committed {
-		lmdb.txn_abort(txn)
+		write_txn_abort(s, txn)
 	}
 	added = insert_txn(s, txn, q) or_return
-	check(lmdb.txn_commit(txn)) or_return
+	write_txn_commit(s, txn) or_return
 	committed = true
 	return added, nil
 }
