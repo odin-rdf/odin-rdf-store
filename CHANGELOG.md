@@ -11,6 +11,51 @@ initiatives, and the ADRs each entry cites.
 
 ### Added
 
+- **Transactions and snapshots** (ADR `STORE-A-0007`, initiative `STORE-I-0004`). One opaque
+  `Txn` handle with a `.Read`/`.Write` mode, and **a read transaction *is* the snapshot** —
+  there is no separate snapshot type and nothing in the API says "snapshot".
+
+  ```odin
+  tx, err := kvstore.txn_begin(s, .Write)   // store.Txn_Mode
+  defer kvstore.txn_abort(&tx)              // a no-op after a successful commit
+  kvstore.load_turtle_txn(&tx, candidate)
+  it, _ := kvstore.match_txn(&tx, pattern)  // sees the load
+  kvstore.txn_commit(&tx)
+  ```
+
+  Every operation gains a `_txn` form taking the handle alone — `insert_txn`, `count_txn`,
+  `match_txn`, `find_term_txn`, `lookup_term_txn`, `intern_term_txn`, the graph-label trio,
+  the quad codec, and all four loaders. The handle carries its dataset, so a consumer threads
+  one thing.
+
+  **This closes the family's one correctness gap: validate-before-commit was inexpressible.**
+  A validator deciding whether a write may join the dataset could not observe the write it was
+  deciding about, and the workaround — build the candidate in a second dataset and validate
+  *that* — is wrong rather than slow: every constraint that must consult existing data reads an
+  empty world and passes vacuously. Now the candidate is built inside a write transaction and
+  validated through that same transaction.
+
+  The guarantees are stated flat, with nothing conditional and no capability a backend can
+  declare its way out of: read-your-own-writes, snapshot isolation, atomicity over quads (not
+  over the dictionary), provisional `Term_ID`s discarded on abort, single writer with no
+  nesting, and iterator invalidation on a write through the same transaction. The conformance
+  suite asserts all of it as one uniform body — no tier, no skip.
+
+  **Two costs are part of the contract rather than backend detail.** An open read transaction
+  pins pages, so a long snapshot makes a concurrent writer grow the file. An open write
+  transaction serializes every other writer against that environment for its lifetime, and the
+  validate-before-commit pattern holds one across an entire validation by construction.
+
+- `Store_Error.Write_Txn_Open`, for a second write transaction on a handle that already has
+  one. **Refused rather than blocked**: within one handle it can only be a programming error,
+  and LMDB's writer lock would self-deadlock a single-threaded consumer. The refusal covers the
+  autocommit procedures too — bare `insert` and the loaders each open a write transaction, so
+  they are refused rather than deadlocking against one you hold. Between *processes* LMDB still
+  serializes writers by blocking, which is what the deployment shape uses and is untouched.
+
+- `store.Txn_Mode`, in the `store` vocabulary package rather than per-backend: it carries no
+  backend content, so every backend would otherwise declare it identically.
+
 - **`kvstore.open_ephemeral`** — a store with no path the caller has to name, make unique,
   or clean up, and which does not outlive the process (`STORE-T-0033`). Same contract and
   same procedure set as `open`; only the storage's lifetime differs. The database is one
@@ -33,6 +78,19 @@ initiatives, and the ADRs each entry cites.
 
 - `Store_Error.Temp_Unavailable`, for an `open_ephemeral` that could find no writable
   temporary location.
+
+### Changed
+
+- **`intern_term_txn` and `find_term_txn` take a `^Txn` instead of `(^Store, ^lmdb.Txn)`.**
+  These are the only two signatures in this release that change, and they change because they
+  were public by omission — `find_term_txn` since `STORE-T-0014` — with LMDB's own type in
+  front of consumers, which `STORE-A-0007` exists to prevent. Leaving them would have made that
+  permanent. No consumer in the family used either, so the practical reach is nil, but a
+  changed public signature is a changed public signature.
+
+- Every **bare** procedure is unchanged in name, signature and semantics, and gains a
+  definition it did not have: a one-operation transaction. Nothing written against the previous
+  release stops compiling or changes meaning.
 
 ## 0.2.0
 

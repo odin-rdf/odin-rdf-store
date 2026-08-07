@@ -9,12 +9,20 @@
 // dictionary), gspo/gpos/gosp (the quad indexes). Every integer in the
 // file is big-endian, so memcmp key order equals numeric ID order.
 //
-// Transactions (STORE-I-0002 decisions 2 and 3): insert commits its
-// own write transaction; match opens a read transaction owned by the
-// iterator and released by match_destroy — matched quads are views of
-// the MVCC snapshot, valid until then. Standalone lookups copy into a
-// caller-supplied allocator. The load_* procedures wrap each document
-// in one write transaction, making a load atomic per document.
+// Transactions (STORE-A-0007, and see txn.odin): one opaque Txn handle
+// with a .Read/.Write mode, of which a read transaction *is* the
+// snapshot. Every operation has a _txn form taking the handle alone,
+// and the bare procedures are *defined* as autocommit over them — a
+// transaction of the appropriate mode, one operation, closed. So insert
+// commits its own write transaction and match opens a read transaction
+// that its iterator owns until match_destroy, exactly as they always
+// did (STORE-I-0002 decisions 2 and 3); what is new is that a caller
+// can say more than one operation at a time. Standalone lookups copy
+// into a caller-supplied allocator.
+//
+// The load_* procedures wrap each document in one write transaction,
+// making a load atomic per document; their _txn forms cannot, since the
+// transaction is the caller's. See load.odin.
 //
 // The linked library is LMDB 0.9.35; only 0.9 API entry points are
 // used (see vendor/lmdb/README.md). darwin_arm64 is the only platform

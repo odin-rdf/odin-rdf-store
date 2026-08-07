@@ -195,6 +195,59 @@ handle exists. Ordered iteration (STORE-T-0015) and cardinality estimates (STORE
 untouched. Multi-writer conflict detection, retry, and isolation levels beyond LMDB's single-writer
 model are not designed here. Nested transactions are forbidden rather than deferred-with-a-shape.
 
+### Amendment, 2026-08-07: what the implementation changed (STORE-I-0004)
+
+> **The decision stands in full. Four things about the *mechanism* above are now factually
+> wrong, and this records which** — an ADR that is right about the design and silently wrong
+> about the details is worse than one that says where it drifted.
+>
+> **1. Point 4's counter snapshot lives on the `Store`, not on the `Txn`.** Point 4 says "`Txn`
+> snapshots `next` at begin and restores it on abort". It does not, and cannot: the single-writer
+> claim had to cover the *autocommit* paths too — bare `insert` and the four loaders each open a
+> write transaction, so a consumer holding a `Txn` and then calling `insert` would have
+> self-deadlocked on LMDB's writer lock, which is exactly what point 3's refusal exists to
+> prevent. Every write transaction now goes through one private begin/commit/abort trio, and
+> those paths have no `Txn` to hang a snapshot on. `Store.write_next` is taken at begin and
+> restored on abort instead. **Strictly wider than what point 4 asked for**, and necessarily so:
+> the loader-abort path is the one place point 4 itself says the drift is reachable today, so
+> repairing only `txn_abort` would have left the invariant not an invariant. Also handled and
+> not mentioned above: **a failed commit is an abort** — LMDB aborts internally before returning
+> the error — so the mirror is restored there too.
+>
+> **2. `txn_begin` has no allocator parameter**, where point 1's signature shows one. A `Txn`
+> owns no memory. The precedent for a caller-held value that owns none is `match`, which takes
+> no allocator either, while `open`, `close` and `lookup_term` all genuinely allocate and do.
+> An unused parameter cannot be removed later without breaking callers; adding one later with a
+> default breaks nobody.
+>
+> **3. `Txn_Mode` lives in the `store` vocabulary package, not per-backend.** Point 1 shows it
+> beside the handle. It carries no backend content at all, so leaving it per-backend means every
+> backend declaring the same two words — the duplication `store` exists to prevent, and the
+> reason `Load_Error` already lives there. The *handle* stays per-backend, since it holds that
+> backend's state.
+>
+> **4. Point 2's "every existing form survives unchanged" has two exceptions**, and they are the
+> two procedures that already published `^lmdb.Txn`. `intern_term_txn` and `find_term_txn` were
+> not private — point 4 lists them among the `@(private)` internals, and for `find_term_txn`
+> that has been untrue since STORE-T-0014 shipped it public. Their old signatures put LMDB's type
+> in front of consumers, which is what point 1 exists to prevent, so leaving them unchanged would
+> have made that permanent. Both are re-signed to take `^Txn`. No consumer in the family used
+> either, so the reach is nil, but the sentence in point 2 is not true as written.
+>
+> **Point 5's iterator check is narrower than its list.** The list says "an iterator invalidated
+> by a write through its own transaction". Point 3 *forbids* that combination rather than
+> defining it, so a check that read a stale iterator would promise whatever the implementation
+> happened to do. The suite asserts the defined parts instead — iterating before the write, and
+> re-opening after it — and no test exercises a stale iterator. The two sentences were in tension
+> in the original; point 3 wins.
+>
+> **Review triggers, checked against what was built.** None fired. Two simultaneous read views
+> were *exercised* — the suite opens a reader beside a writer, and several iterators on one
+> transaction — and the caller-held-value handle took it without strain, but no consumer has
+> asked for it, so the trigger stands unfired rather than answered. `mdb_txn_reset` /
+> `mdb_txn_renew` did not come up. STORE-T-0023 has not landed, no second backend has been
+> proposed, and no multi-writer coordination has been requested.
+
 ## Alternatives Analysis **[CONDITIONAL: Complex Decision]**
 
 | Option | Pros | Cons | Risk Level | Implementation Cost |

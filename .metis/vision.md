@@ -48,7 +48,13 @@ Round-tripping through odin-rdf-parser preserves data semantics for all four for
 
 Since then: STORE-A-0004 reversed STORE-I-0002's darwin_arm64-only platform stance. The LMDB C sources are vendored at `LMDB_0.9.35` and an archive is built and suite-verified per platform — macOS arm64/x86_64, Linux x86_64/arm64, Windows x86_64 — so every supported platform links a proven archive and `system:lmdb` is a fallback rather than the plan. CI runs on Linux, macOS, and Windows. Tagged **v0.1.0**.
 
-Outstanding work is growth, not debt: seven backlog items covering ordered iteration, cardinality estimates, snapshot reads, dataset introspection, a named-graph wildcard, `triple_parts`, and sentinel reservation. Two of them — dataset introspection and the named-graph wildcard — are the ones **odin-rdf-shacl** is most likely to pull when its target resolution lands.
+Outstanding work was growth, not debt: seven backlog items covering ordered iteration, cardinality estimates, snapshot reads, dataset introspection, a named-graph wildcard, `triple_parts`, and sentinel reservation. Two of them — dataset introspection and the named-graph wildcard — are the ones **odin-rdf-shacl** is most likely to pull when its target resolution lands.
+
+> **Amendment, 2026-08-07 (STORE-A-0007 / STORE-I-0004): two of those seven are delivered, and one of them was not growth.** Snapshot reads (STORE-T-0019) and write transactions (STORE-T-0022) are shipped as one model — one `Txn` handle with a `.Read`/`.Write` mode, of which a read transaction *is* the snapshot — and both items are archived as superseded. Five backlog items remain, and they are still growth: ordered iteration, cardinality estimates, dataset introspection, a named-graph wildcard, `triple_parts`, and sentinel reservation, plus `remove` (STORE-T-0023) and `insert_all` (STORE-T-0024), which STORE-A-0007 deliberately left out of scope and which both get simpler now.
+>
+> **STORE-T-0022 was debt, not growth, and the vision did not say so.** It was a P0 correctness gap rather than a capability: **validate-before-commit was inexpressible.** A validator deciding whether a write may join the dataset could not observe the write it was deciding about, and the only workaround the interface admitted — building the candidate in a second dataset and validating that — passes vacuously for every constraint that must consult existing data. That is worth recording as a correction to how this section read, not just as a checkbox: an item filed as a backlog feature was in fact the one thing the library got wrong.
+>
+> **STORE-I-0001's "concurrency guarantees beyond single-threaded use" non-goal is narrowed, not reversed.** What is now guaranteed is what LMDB already provided across processes — snapshot isolation, atomicity, one writer at a time — which is exactly the shape the deployment has: ~200 processes per machine, each embedding a store. Multi-writer conflict detection, retry, and isolation levels beyond the single-writer model remain out of scope and are explicitly not designed.
 
 ## Future State
 
@@ -70,6 +76,7 @@ A complete, well-tested Odin library where:
 ## Success Criteria
 
 - odin-rdf-sparql's basic graph pattern evaluation runs against the match interface without interface changes it cannot absorb.
+- An application can decide whether to keep a write by examining the dataset that write would produce, and can write several quads as one unit. *(Added 2026-08-07 with STORE-I-0004: it was the one thing this library could not express, and a success criterion is where that belongs. Met — the conformance suite demonstrates it rather than describing it.)*
 - Bulk ingestion via odin-rdf-parser works at scale and validates the parser's clone/intern contract in real use (this closes the open success criterion in the parser's vision RDF-V-0001).
 - Round-trip: load → match/export → compare preserves data semantics for all four formats.
 - The backend passes a store test suite covering set semantics, all match patterns, and dataset/graph edge cases (default vs. named graphs, blank node identity, RDF-star terms). *(Met 2026-08-06 by both backends then shipped; reworded 2026-08-07 when the in-memory one was retired — STORE-A-0006. The suite and its `Backend` adapter are retained so a future backend meets the same criterion.)*

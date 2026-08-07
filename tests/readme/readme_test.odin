@@ -128,3 +128,113 @@ remove_readme_db :: proc(path: string) {
 	os.remove(path)
 	delete(path)
 }
+
+// The README's Transactions section, and the validate-before-commit
+// example it turns on. The README's `conforms` is the caller's; here it
+// is the uniqueness predicate that makes the point — a constraint the
+// isolated-candidate workaround passes vacuously.
+@(test)
+readme_validate_before_commit_example :: proc(t: ^testing.T) {
+	s, open_err := kvstore.open_ephemeral()
+	testing.expect(t, open_err == nil)
+	defer kvstore.close(s)
+
+	// Already committed: alice holds the address.
+	_, parse_err, load_err := kvstore.load_turtle(
+		s,
+		transmute([]byte)string(`@prefix ex: <http://example.org/> .
+ex:alice ex:email "a@example.org" .`),
+	)
+	testing.expect_value(t, parse_err.message, "")
+	testing.expect(t, load_err == nil)
+
+	// conforms reads through the caller's transaction, so it sees the
+	// candidate and everything already committed at once.
+	conforms :: proc(tx: ^kvstore.Txn) -> bool {
+		email, email_found, _ := kvstore.find_term_txn(tx, rdf.IRI(EX + "email"))
+		if !email_found {
+			return true
+		}
+		it, err := kvstore.match_txn(
+			tx,
+			store.Match_Pattern{store.WILDCARD, email, store.WILDCARD, store.WILDCARD},
+		)
+		if err != nil {
+			return false
+		}
+		defer kvstore.match_destroy(&it)
+
+		seen := make(map[store.Term_ID]struct {}, 8, context.temp_allocator)
+		for q in kvstore.match_next(&it) {
+			if _, taken := seen[q[store.QUAD_O]]; taken {
+				return false // two resources share an address
+			}
+			seen[q[store.QUAD_O]] = {}
+		}
+		return true
+	}
+
+	accept :: proc(s: ^kvstore.Store, candidate: string) -> bool {
+		tx, err := kvstore.txn_begin(s, .Write)
+		if err != nil {
+			return false
+		}
+		defer kvstore.txn_abort(&tx)
+
+		_, parse_err, load_err := kvstore.load_turtle_txn(&tx, transmute([]byte)candidate)
+		if parse_err.message != "" || load_err != nil {
+			return false
+		}
+		if !conforms(&tx) {
+			return false // the deferred abort leaves the dataset as it was
+		}
+		return kvstore.txn_commit(&tx) == nil
+	}
+
+	free := `@prefix ex: <http://example.org/> .
+ex:dave ex:email "d@example.org" .`
+	testing.expect(t, accept(s, free), "a free address is accepted")
+
+	taken := `@prefix ex: <http://example.org/> .
+ex:erin ex:email "a@example.org" .`
+	testing.expect(t, !accept(s, taken), "a duplicate address is rejected")
+
+	// Two quads: alice's and dave's. Erin's never landed.
+	n, count_err := kvstore.count(s)
+	testing.expect(t, count_err == nil)
+	testing.expect_value(t, n, 2)
+	free_all(context.temp_allocator)
+}
+
+// A read transaction is a snapshot: the README's claim, compiled.
+@(test)
+readme_snapshot_example :: proc(t: ^testing.T) {
+	s, open_err := kvstore.open_ephemeral()
+	testing.expect(t, open_err == nil)
+	defer kvstore.close(s)
+
+	_, parse_err, load_err := kvstore.load_turtle(s, transmute([]byte)string(README_SOURCE))
+	testing.expect_value(t, parse_err.message, "")
+	testing.expect(t, load_err == nil)
+
+	tx, txn_err := kvstore.txn_begin(s, .Read)
+	testing.expect(t, txn_err == nil)
+	defer kvstore.txn_abort(&tx)
+
+	before, _ := kvstore.count_txn(&tx)
+
+	// A whole write lands and commits underneath the snapshot.
+	_, _, later_err := kvstore.load_turtle(
+		s,
+		transmute([]byte)string(`@prefix ex: <http://example.org/> .
+ex:carol ex:knows ex:dave .`),
+	)
+	testing.expect(t, later_err == nil)
+
+	after, _ := kvstore.count_txn(&tx)
+	testing.expect_value(t, after, before)
+
+	// Outside the snapshot the dataset really did move.
+	outside, _ := kvstore.count(s)
+	testing.expect_value(t, outside, before + 1)
+}

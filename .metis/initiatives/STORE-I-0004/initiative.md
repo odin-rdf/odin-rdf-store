@@ -442,3 +442,39 @@ criteria dropped as dead and STORE-A-0007's own additions folded in.
     delivered validate-before-commit end to end.
 
   Awaiting review before activation.
+
+- **2026-08-07 — Seven of eight tasks completed. The initiative stays active, and the reason
+  is one exit criterion that cannot be closed by writing anything.**
+
+  T-0034 (the handle), T-0035 (the contract), T-0036 (the `_txn` set), T-0037 (`match_txn`),
+  T-0038 (the loaders, signed off as in scope), T-0039 (conformance) and T-0040 (docs, vision,
+  release decision) are done and committed. **T-0041, the sibling proposals, is the only task
+  left**, and it is deliberately not an exit criterion.
+
+  **The suite went 40 → 73 tests per width** across this initiative and STORE-T-0033 together:
+  store 5, store/kvstore 33 → 64, tests/readme 2 → 4.
+
+  **What is open, stated precisely so the record is not stronger than the evidence.** The final
+  exit criterion — CI green on Linux, macOS and Windows at both widths — **is unverified,
+  because nothing in this initiative has been pushed.** Six commits sit locally on top of
+  v0.2.0, and everything is green on local darwin_arm64 only. This is the gap STORE-I-0003
+  carried at the same stage, and the same remedy: push, watch three platforms, then tag.
+
+  **The release decision is taken: 0.3.0**, and by the rule rather than by taste. The release is
+  not purely additive — `intern_term_txn` and `find_term_txn` changed signature — and the
+  CHANGELOG's own header says a minor bump is where breaking changes land under 0.x. Tagging
+  waits for CI, per STORE-I-0003's practice of tagging the commit CI verified.
+
+  **Four things drifted from STORE-A-0007 during implementation, and the ADR now records all of
+  them** in a dated amendment: the counter snapshot moved from the `Txn` to the `Store`, no
+  allocator on `txn_begin`, `Txn_Mode` in the `store` package, and point 2's "every existing
+  form survives unchanged" having two exceptions. The decision stands in full; what was wrong
+  was the mechanism it described.
+
+  **The one finding worth carrying out of the whole initiative**, because it was in no task as
+  filed: the single-writer refusal would have had a hole exactly where a confused consumer
+  falls in. Bare `insert` and the four loaders each open a write transaction — that is what
+  autocommit *is* — so a consumer holding a `Txn` and then calling `insert` would have
+  self-deadlocked on LMDB's writer lock, which is the precise outcome the refusal exists to
+  prevent. Routing every write path through one claim closed it, and forced the better design
+  of the counter snapshot as a side effect.

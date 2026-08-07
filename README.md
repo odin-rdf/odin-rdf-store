@@ -29,12 +29,15 @@ was the reference the interface was defined against; it was retired on
 2026-08-07 ([ADR STORE-A-0006](.metis/adrs/STORE-A-0006.md)) because no
 consumer outside the test suites ever asked for one, and because the
 transaction model the query and validation layers need came out shaped
-by accommodating it. Two consequences are worth stating plainly rather
-than leaving to be discovered: **every consumer of this library links
-LMDB**, and **every dataset is a filesystem path** — LMDB has no
-anonymous or in-memory mode. The `store` / `store/kvstore` split and the
-`conformance` adapter are kept so a second backend can be added on
-evidence.
+by accommodating it. That retirement paid off immediately: with one
+backend, [Transactions](#transactions) below states guarantees rather
+than capabilities a consumer must check. Two consequences are worth
+stating plainly rather than leaving to be discovered: **every consumer of
+this library links LMDB**, and **every dataset is a filesystem path** —
+LMDB has no anonymous or in-memory mode, though `open_ephemeral` means a
+scratch dataset no longer makes that your problem. The `store` /
+`store/kvstore` split and the `conformance` adapter are kept so a second
+backend can be added on evidence.
 
 ## The match interface
 
@@ -114,10 +117,13 @@ for {
 ```
 
 The store is a directory LMDB owns, and quads and the dictionary survive
-process restarts with stable `Term_ID`s. `insert` commits its own write
-transaction; `match` opens a read transaction owned by the iterator and
-released by `match_destroy`, so matched quads are views of that MVCC
-snapshot for as long as the iterator lives.
+process restarts with stable `Term_ID`s. Every procedure above is
+**autocommit** — a transaction of the appropriate mode, one operation,
+closed — so `insert` commits its own write transaction and `match` opens
+a read transaction, which its iterator owns and `match_destroy` releases.
+Matched quads are views of that one snapshot for as long as the iterator
+lives. See [Transactions](#transactions) for what an autocommit-only
+consumer does *not* get, and for the `_txn` form of each of these.
 
 The four loaders — `load_triples`, `load_turtle`, `load_quads`,
 `load_trig` — cover the parser's four formats. Each interns every
@@ -126,7 +132,14 @@ so nothing borrowed from a parser statement outlives its loop iteration,
 and each wraps one document in one write transaction, so a load is
 atomic per document: a syntax error at the last statement leaves the
 store as it was. Blank node labels are document-scoped: loading two
-documents that both say `_:b0` yields two distinct terms.
+documents that both say `_:b0` yields two distinct terms — including two
+loads into the same transaction.
+
+Their `_txn` forms invert exactly one of those properties, and it is the
+one worth reading twice: `load_turtle_txn` and friends **cannot** be
+atomic per document, because the transaction belongs to the caller. A
+parse error leaves the statements that parsed before it written into your
+transaction, `added` reports how many, and aborting is yours to do.
 
 ### A store that dies with the process
 
@@ -173,6 +186,107 @@ for {
 }
 free_all(context.temp_allocator)
 ```
+
+## Transactions
+
+Every procedure in the quick start is a one-operation transaction. That
+is enough for a great deal, and it is exactly what it says: **there is no
+relationship between two of them.** Two `match`es are two snapshots. A
+validator run between a write and its commit cannot see the write,
+because there is no *between*.
+
+`txn_begin` gives you the between.
+
+```odin
+Txn_Mode :: enum { Read, Write }   // in the store package
+
+tx, err := kvstore.txn_begin(s, .Write)
+defer kvstore.txn_abort(&tx)       // a no-op after a successful commit
+
+added, parse_err, load_err := kvstore.load_turtle_txn(&tx, candidate)
+it, match_err := kvstore.match_txn(&tx, pattern)  // sees the load
+defer kvstore.match_destroy(&it)
+...
+commit_err := kvstore.txn_commit(&tx)
+```
+
+Every operation has a `_txn` form taking the handle alone — the handle
+carries its dataset, so you thread one thing. `insert_txn`, `count_txn`,
+`match_txn`, `find_term_txn`, `lookup_term_txn`, `intern_term_txn`, the
+graph-label trio, the quad codec, and all four loaders. The bare forms
+are unchanged and are *defined* as autocommit over these.
+
+**A read transaction is a snapshot.** There is no separate snapshot type
+and nothing in the API says "snapshot": a stable view of the dataset is
+what a read transaction already is. Take one at the start of a query and
+release it at the end, and the query's answer is an answer about one
+dataset rather than one assembled from several.
+
+The guarantees, with nothing conditional:
+
+- **Read-your-own-writes** — a read through an open transaction sees that
+  transaction's own uncommitted writes.
+- **Snapshot isolation** — a read transaction is stable; concurrent
+  commits do not disturb it.
+- **Atomicity over quads** — after commit every quad is visible, after
+  abort none is. *Not* over the dictionary: whether a term interned in an
+  aborted transaction stays interned is unspecified, and `Term_ID`s from
+  a transaction that did not commit must be discarded.
+- **Single writer, no nesting** — one write transaction per store at a
+  time; a second is **refused with an error rather than blocked**, since
+  within one handle it can only be a mistake. Autocommit writes claim the
+  same single writer, so `insert` and the loaders are refused too while
+  you hold one — they do not deadlock against it. Across *processes*
+  LMDB serializes writers by blocking, which is untouched.
+- **Iterator lifetime** — an iterator is valid until `match_destroy`, a
+  write through its own transaction, or that transaction's end. Writing
+  invalidates every iterator open on the transaction; re-open after
+  writing. The combination is forbidden rather than defined.
+
+### Validate before commit
+
+The reason the model exists. Accept a description of a resource, decide
+whether it may join the dataset by examining **the dataset it would
+produce**, and keep it only if the answer is yes:
+
+```odin
+tx, _ := kvstore.txn_begin(s, .Write)
+defer kvstore.txn_abort(&tx)
+
+kvstore.load_turtle_txn(&tx, candidate)   // build the candidate
+if conforms(&tx) {                        // read it *and* the existing data
+    kvstore.txn_commit(&tx)
+}
+// otherwise the deferred abort leaves the dataset as it was
+```
+
+`conforms` is yours — a SHACL run, a query, a hand-written predicate —
+and what matters is that it reads through `&tx`, so it sees the candidate
+and everything already committed at once. The alternative people reach
+for, building the candidate in a second dataset and validating *that*, is
+not merely slower: it is wrong. Every constraint that must consult
+existing data — a class hierarchy, a reference to an existing resource,
+uniqueness across the dataset — reads an empty world and passes
+vacuously. A validator that cannot fail is worse than no validator.
+
+### Two costs, which are part of the contract
+
+Neither is a detail you should discover in production.
+
+- **An open read transaction pins pages.** A long-held snapshot makes a
+  concurrent writer grow the file, because the pages the reader can still
+  see cannot be reused. Holding one for the life of a query is fine;
+  holding one for the life of a request handler is a storage-sizing
+  decision.
+- **An open write transaction holds the environment's writer lock** and
+  serializes every other writer against that environment for its
+  lifetime. The validate-before-commit pattern holds one across the whole
+  validation *by construction* — read-your-own-writes is the point — so
+  those transactions are long by design.
+
+The `_txn` suffix marks what is really the primary API, which is
+backwards. It stays: the alternative renames every procedure the query
+and validation engines already call.
 
 ## Term IDs
 
