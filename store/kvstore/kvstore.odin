@@ -24,6 +24,10 @@
 // Loaders are atomic per document (a parse error persists nothing) —
 // a documented divergence from the in-memory package's keep-partial
 // loaders; see load.odin.
+//
+// Two constructors, one contract: open takes a path and the data
+// survives the process; open_ephemeral takes none and the data does
+// not. Everything after the constructor is identical.
 package kvstore
 
 import "core:encoding/endian"
@@ -81,6 +85,9 @@ Db_Error :: distinct i32
 Store_Error :: enum {
 	// The database's format version is unknown to this code.
 	Unsupported_Format,
+	// No writable temporary location was available, so an ephemeral
+	// store could not reserve a file to live in; see open_ephemeral.
+	Temp_Unavailable,
 	// The database was created with the other Term_ID width
 	// (STORE-A-0001: widths never mix silently).
 	Width_Mismatch,
@@ -126,8 +133,8 @@ Options :: struct {
 	// stores, which in practice means test suites: at the 1 GiB default
 	// a Windows CI job spends minutes materializing files it never
 	// writes to, where the same job on Linux spends seconds. A harness
-	// that opens a store per test should pass a small map_size rather
-	// than take this default (STORE-T-0033).
+	// that opens a store per test wants open_ephemeral, whose
+	// EPHEMERAL_OPTIONS carries a scratch-sized map instead.
 	map_size:    uint,
 	max_readers: u32,
 	// Trades durability for write speed: a crash may lose recent
@@ -141,16 +148,48 @@ DEFAULT_OPTIONS :: Options {
 	max_readers = 126,
 }
 
-// Store is the persistent dataset + dictionary. One Store owns one
-// LMDB environment; LMDB's single-writer rule makes the in-memory
-// counter mirror safe.
+// EPHEMERAL_OPTIONS is open_ephemeral's default: a scratch-sized map
+// and no fsync, neither of which a store that dies with the process
+// has any use for.
+//
+// **16 MiB, and the number has an origin** (STORE-T-0033). Measured
+// over every RDF document vendored in the family's three test suites:
+// the largest single document leaves a 288 KiB high-water mark
+// (SHACL's shacl-shacl-data-shapes.ttl, 415 quads), and loading an
+// entire suite tree into one store — the upper bound if a harness ever
+// shares one scratch store across a whole suite rather than opening
+// one per test — leaves 2.03 MiB (odin-rdf-sparql's W3C tree, 3,977
+// quads). 16 MiB is roughly 8x that aggregate and 56x the largest
+// single document. Too small would turn a passing suite into
+// MDB_MAP_FULL on a large fixture; too large is what made this
+// procedure necessary, since on Windows every open materializes
+// map_size in full (see Options.map_size). A caller with a bigger
+// fixture passes a bigger map rather than growing this default.
+//
+// no_sync is unconditionally right here rather than a trade: the file
+// is unlinked, so there is nothing for a durable commit to be durable
+// for.
+EPHEMERAL_OPTIONS :: Options {
+	map_size    = 16 << 20,
+	max_readers = 126,
+	no_sync     = true,
+}
+
+// Store is the dataset + dictionary. One Store owns one LMDB
+// environment; LMDB's single-writer rule makes the in-memory counter
+// mirror safe. Whether it survives the process is the constructor's
+// business (open / open_ephemeral) and nothing below this line's.
 Store :: struct {
 	env:       ^lmdb.Env,
 	dbi:       [Db]lmdb.Dbi,
 	// Per-kind next counters, mirroring meta; persisted in the same
 	// write transaction as the entries they cover.
-	next:      [4]u64,
-	read_only: bool,
+	next:         [4]u64,
+	read_only:    bool,
+	// The file close must delete. Non-empty only for an ephemeral store
+	// on a platform with no unlink-while-open; everywhere else
+	// open_ephemeral unlinks before it returns and leaves this empty.
+	scratch_path: string,
 }
 
 // open opens (creating if absent) the store at path, a directory. A
@@ -201,8 +240,117 @@ open :: proc(path: string, opts := DEFAULT_OPTIONS, allocator := context.allocat
 	return s, nil
 }
 
+// open_ephemeral opens a store with no path the caller has to name,
+// make unique, or clean up, and which does not outlive the process.
+// Same store, same contract, same procedure set as open — only the
+// storage's lifetime differs. It is the constructor a test suite, a
+// scratch load, or a throwaway staging graph wants; anything whose
+// data must survive the process wants open.
+//
+// **There is no cleanup path, by construction.** The database is one
+// file (NOSUBDIR) with no lock file (NOLOCK), and on POSIX the path is
+// unlinked as soon as env_open returns: the inode stays alive while
+// LMDB holds the descriptor, is invisible in the filesystem namespace
+// for the store's whole life, and is reclaimed by the kernel on close
+// *or on crash*. Nothing is left for a later run to trip over and
+// nothing has to be removed by hand.
+//
+// **Windows is the exception and it is stated rather than papered
+// over**: there is no unlink-while-open, so the file survives until
+// close deletes it. An abnormal termination leaks exactly one file in
+// the temp directory.
+//
+// NOLOCK is legitimate here because an ephemeral store is exclusively
+// the opening process's — no other process can find the file, let
+// alone open it. It is *not* safe if the handle escapes the process by
+// some other route: LMDB is then doing no inter-process
+// synchronization at all. Do not hand an ephemeral store to a child
+// process.
+//
+// opts.read_only is ignored: a read-only store that no one can ever
+// write to is empty forever. Everything else is honoured; see
+// EPHEMERAL_OPTIONS for why the default map is 16 MiB rather than
+// DEFAULT_OPTIONS' 1 GiB.
+open_ephemeral :: proc(opts := EPHEMERAL_OPTIONS, allocator := context.allocator) -> (s: ^Store, err: Error) {
+	context.allocator = allocator
+
+	path := ephemeral_reserve(allocator) or_return
+	keep_path := false
+	defer if !keep_path {
+		delete(path)
+	}
+
+	s = new(Store)
+	defer if err != nil {
+		if s.env != nil {
+			lmdb.env_close(s.env)
+		}
+		free(s)
+		os.remove(path)
+	}
+
+	check(lmdb.env_create(&s.env)) or_return
+	check(lmdb.env_set_maxdbs(s.env, lmdb.Dbi(len(Db)))) or_return
+	check(lmdb.env_set_mapsize(s.env, lmdb.Size_T(opts.map_size))) or_return
+	check(lmdb.env_set_maxreaders(s.env, opts.max_readers)) or_return
+
+	// NOTLS as in open. NOSUBDIR makes the path the database file
+	// rather than a directory holding one, which is what lets the file
+	// be a single unlinkable inode. NOLOCK suppresses the reader table,
+	// so there is no second file and no shared-memory segment to clean
+	// up either.
+	flags: u32 = lmdb.NOTLS | lmdb.NOSUBDIR | lmdb.NOLOCK
+	if opts.no_sync {
+		flags |= lmdb.NOSYNC
+	}
+
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	check(lmdb.env_open(s.env, cpath, flags, 0o600)) or_return
+
+	open_databases(s) or_return
+
+	// Every descriptor LMDB opens by name — the data file and, without
+	// WRITEMAP, the synchronous meta descriptor — is open by the time
+	// env_open returns, so unlinking now costs the store nothing. It
+	// happens last so that the error defer above still has a path to
+	// remove.
+	when ODIN_OS == .Windows {
+		s.scratch_path = path
+		keep_path = true
+	} else {
+		os.remove(path)
+	}
+	return s, nil
+}
+
+// ephemeral_reserve wins a unique name in the OS temp directory by
+// creating the file, then closes it and hands back the path — LMDB
+// reopens it, and an empty file is a fresh environment to LMDB.
+//
+// Reserving by creation is the point: uniqueness is O_CREAT|O_EXCL's,
+// not a naming scheme's. Twelve hand-rolled temp paths across this
+// family keyed on pid, or on pid and a test name, and four of them
+// collided the moment two tests ran at once on the same pid. There is
+// no scheme here to get wrong — a lost race retries against the
+// filesystem.
+@(private)
+ephemeral_reserve :: proc(allocator := context.allocator) -> (path: string, err: Error) {
+	// An empty dir means the OS temp directory, resolved by core:os:
+	// TMPDIR on POSIX, GetTempPathW on Windows. That is the dance this
+	// procedure exists to stop everyone copying.
+	f, ferr := os.create_temp_file("", "odin-rdf-store-*.mdb")
+	if ferr != nil {
+		return "", .Temp_Unavailable
+	}
+	path = strings.clone(os.name(f), allocator)
+	os.close(f)
+	return path, nil
+}
+
 // close releases the environment; every ID, iterator, and borrowed
-// value obtained from the store becomes invalid.
+// value obtained from the store becomes invalid. An ephemeral store's
+// backing file goes with it — already unlinked on POSIX, deleted here
+// on Windows.
 close :: proc(s: ^Store, allocator := context.allocator) {
 	context.allocator = allocator
 	if s == nil {
@@ -210,6 +358,10 @@ close :: proc(s: ^Store, allocator := context.allocator) {
 	}
 	if s.env != nil {
 		lmdb.env_close(s.env)
+	}
+	if s.scratch_path != "" {
+		os.remove(s.scratch_path)
+		delete(s.scratch_path)
 	}
 	free(s)
 }

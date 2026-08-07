@@ -16,7 +16,9 @@ package store
 //
 // Opening and closing a dataset is deliberately not in the set: it is
 // where a backend's own nature shows, and kvstore's is open(path, opts)
-// / close over an LMDB environment. kvstore's operations can also fail
+// / open_ephemeral(opts) / close over an LMDB environment — two
+// constructors differing only in whether the storage outlives the
+// process, and identical in everything above. kvstore's operations can also fail
 // against that environment, so its fallible procedures return an Error.
 // What the convention fixes is the names, the semantics, and the
 // iteration contract — not the lifecycle.

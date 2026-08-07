@@ -28,8 +28,7 @@ decode_all :: proc(t: ^testing.T, s: ^Store, allocator: mem.Allocator) -> [dynam
 
 @(test)
 test_load_four_formats :: proc(t: ^testing.T) {
-	path, s := with_store("load-formats")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	nt := `<http://example.org/alice> <http://example.org/knows> <http://example.org/bob> .
@@ -93,8 +92,7 @@ test_load_atomic_per_document :: proc(t: ^testing.T) {
 	// A parse error aborts the whole document's transaction: nothing
 	// persists — the documented divergence from the in-memory loader's
 	// keep-partial behavior.
-	path, s := with_store("load-atomic")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	src := `<http://example.org/a> <http://example.org/p> "ok" .

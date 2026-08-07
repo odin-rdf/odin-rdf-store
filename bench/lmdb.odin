@@ -14,30 +14,23 @@ package main
 
 import "core:fmt"
 import "core:os"
-import "core:strings"
 import "core:time"
 
 import store "../store"
 import kvstore "../store/kvstore"
 
-// The separator is added here rather than assumed: macOS exports TMPDIR with
-// a trailing slash and Linux usually exports nothing, so concatenating onto
-// the variable yields a path at the filesystem root on Linux. Windows names
-// the variable TEMP or TMP.
+// The benchmarks keep a real path deliberately, and are the case
+// STORE-T-0033 named as the legitimate one: bench_lmdb_load reports
+// bytes/statement by stat-ing data.mdb after the load, which needs a
+// file it can name, and both measure a store configured the way a
+// deployment configures one — DEFAULT_OPTIONS' 1 GiB map, not
+// open_ephemeral's scratch map. Measuring a scratch store would be
+// measuring something nobody runs.
 @(private = "file")
 bench_db_path :: proc(name: string) -> string {
-	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	if tmp == "" {
-		tmp = os.get_env("TEMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = os.get_env("TMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = "/tmp"
-	}
-	tmp = strings.trim_right(tmp, `/\`)
-	return fmt.aprintf("%s/odin-rdf-store-bench-%s-%d", tmp, name, os.get_pid())
+	path, err := os.make_directory_temp("", fmt.tprintf("odin-rdf-store-bench-%s-*", name), context.allocator)
+	assert(err == nil, "the OS temp directory must be writable")
+	return path
 }
 
 @(private = "file")

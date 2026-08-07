@@ -3,40 +3,43 @@ package kvstore
 import "core:encoding/endian"
 import "core:fmt"
 import "core:os"
-import "core:strings"
 import "core:testing"
 
 import lmdb "../../vendor/lmdb"
 import store ".."
 
-// test_db_path returns a fresh database directory path under the OS
-// temp directory; callers remove it with remove_test_db. Shared by all
-// of this package's test files.
+// scratch_store opens a store no test has to name or clean up. This is
+// what a test wants unless it is testing open itself; see
+// STORE-T-0033.
 @(private)
-test_db_path :: proc(name: string) -> string {
-	return temp_path("test", name)
+scratch_store :: proc() -> ^Store {
+	s, err := open_ephemeral()
+	assert(err == nil, "test store must open")
+	return s
 }
 
-// temp_path joins the OS temp directory with a run-unique name. The
-// separator is added here rather than assumed: macOS exports TMPDIR with a
-// trailing slash and Linux usually exports nothing at all, so concatenating
-// straight onto the variable yields "/tmpodin-rdf-store-..." at the
-// filesystem root on Linux, which a non-root user cannot create. Windows
-// names the variable TEMP or TMP and has no /tmp to fall back to.
+// test_db_path creates a fresh database directory under the OS temp
+// directory and returns it; callers remove it with remove_test_db.
+//
+// Only the handful of tests that need a path *as their subject* still
+// use this — reopening a closed store, opening one read-only, and
+// rewriting a meta value behind the store's back all name a database
+// twice, which is precisely what an ephemeral store cannot do.
+// Everything else takes scratch_store.
+//
+// The OS temp directory and a name no concurrent caller can compute
+// are both core:os's here, not this file's. The hand-rolled version
+// (TMPDIR → TEMP → TMP → /tmp, trailing-separator trim, pid suffix)
+// went twelve ways across this family and collided four times, always
+// on a uniqueness scheme rather than on the boilerplate around it;
+// make_directory_temp wins the name with mkdir and retries a lost
+// race. name survives only so a leftover directory says which test
+// left it.
 @(private)
-temp_path :: proc(kind, name: string) -> string {
-	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	if tmp == "" {
-		tmp = os.get_env("TEMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = os.get_env("TMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = "/tmp"
-	}
-	tmp = strings.trim_right(tmp, `/\`)
-	return fmt.aprintf("%s/odin-rdf-store-%s-%s-%d", tmp, kind, name, os.get_pid())
+test_db_path :: proc(name: string) -> string {
+	path, err := os.make_directory_temp("", fmt.tprintf("odin-rdf-store-test-%s-*", name), context.allocator)
+	assert(err == nil, "the OS temp directory must be writable")
+	return path
 }
 
 @(private)

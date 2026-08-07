@@ -128,6 +128,33 @@ atomic per document: a syntax error at the last statement leaves the
 store as it was. Blank node labels are document-scoped: loading two
 documents that both say `_:b0` yields two distinct terms.
 
+### A store that dies with the process
+
+`open_ephemeral` is the same store with a different storage lifetime:
+no path to name, make unique, or clean up.
+
+```odin
+s, open_err := kvstore.open_ephemeral()
+defer kvstore.close(s)
+// ... identical from here: load_turtle, match, find_term, lookup_term
+```
+
+The database is one file with no lock file, and on POSIX it is unlinked
+as soon as it is open: invisible in the filesystem for the store's whole
+life, and reclaimed by the kernel on close *or on crash*. Windows has no
+unlink-while-open, so the file survives until `close` deletes it and an
+abnormal termination leaks exactly one file.
+
+Its default map is 16 MiB rather than `DEFAULT_OPTIONS`' 1 GiB, which is
+not only tidiness: on Windows LMDB has no sparse-file handling, so every
+open materializes `map_size` on disk in full. A harness that opens a
+store per test wants this constructor. Pass a larger `Options.map_size`
+for a scratch load bigger than the 16 MiB default expects.
+
+`NOLOCK` makes an ephemeral store exclusively the opening process's —
+correct, since no other process can find the file, and unsafe if the
+handle is passed to a child.
+
 ### Export
 
 There is no export API in v1 — getting data back out is match + decode

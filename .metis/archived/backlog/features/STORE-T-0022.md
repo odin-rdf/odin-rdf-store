@@ -7,7 +7,7 @@ created_at: 2026-08-07T15:11:19.646429+00:00
 updated_at: 2026-08-07T15:11:19.646429+00:00
 parent: 
 blocked_by: []
-archived: false
+archived: true
 
 tags:
   - "#task"
@@ -93,6 +93,8 @@ merely ugly; this one's workaround is a validator that silently approves.
 - **User Value**: An application can decide whether to keep a write by looking at what the write would produce, and can write several quads as one unit. Those are the two things any editing application needs and neither is expressible today.
 - **Business Value**: Opens the store to the whole class of consumers that accept data from outside themselves — services, interactive shells, editors — which is the majority of what the family is for. Getting the concept into the interface before consumers build around per-operation autocommit is far cheaper than after.
 - **Effort Estimate**: S–M for kvstore (the machinery exists behind `@(private)`; the work is threading a caller-supplied transaction through the read paths and publishing it). M–L for memstore, which has no versioning and needs a journal to make abort meaningful. L for the contract, which is the real work and is shared with STORE-T-0019.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
@@ -191,3 +193,36 @@ not part of it and should not be designed here.
   Its price is stated in the contract rather than discovered: that write transaction is held
   across an entire SHACL validation by construction, and it serializes every other writer
   against that environment for its lifetime. Ready to decompose jointly with STORE-T-0019.
+
+- **2026-08-07 — Superseded by STORE-I-0004 and archived.** Promoted jointly with
+  STORE-T-0019, as the update above recommended, and archived only after that initiative was
+  decomposed into its eight tasks — not at promotion, so that this item's acceptance criteria
+  could be transcribed into the initiative's Exit Criteria rather than buried mid-transcription.
+
+  **Where each acceptance criterion went.** The transaction handle, read-your-own-writes,
+  atomicity, and "`store/interface.odin` states the write model with today's autocommit
+  `insert` unchanged" are exit criteria almost verbatim — atomicity sharpened to *over quads,
+  not over the dictionary*, which is the one place STORE-A-0007 narrowed what this item asked
+  for and it is narrowed deliberately: an orphaned term matches no quad, and unwinding the
+  dictionary on abort is the only place "atomic" would have cost anything. "Designed jointly
+  with STORE-T-0019, and the outcome recorded" was **already discharged** by STORE-A-0007 —
+  one handle with a read-only mode, and the reason. The conformance criterion became
+  STORE-T-0039's uniform body, minus "both backends". "The interaction with match iterators is
+  specified" became the iterator-invalidation criterion, and the answer is the one this item
+  allowed for: the combination is **forbidden explicitly** rather than defined.
+
+  **The criterion that died rather than moved**: "memstore's guarantee decided and documented
+  even where it is weaker." STORE-I-0003 removed the backend, which is why this item's
+  effort estimate — "M–L for memstore, which has no versioning and needs a journal to make
+  abort meaningful; L for the contract" — collapsed to an M initiative that is mostly
+  publication.
+
+  **This item's evidence is what the initiative exists for and is untouched: validate-before-
+  commit is inexpressible, and it is the one P0 on the backlog.** Two things about how it
+  closes are worth carrying forward. First, STORE-I-0004 proves it with a *test* (STORE-T-0039),
+  including the case the isolated-candidate workaround gets wrong — a constraint that must read
+  pre-existing data and therefore passes vacuously against an empty world. Second, and it
+  should not be misread later: the store's handle makes validate-before-commit **possible, not
+  reachable**. odin-rdf-shacl's `Access` adapters still bind to a bare store, so the gap stays
+  open at `odin-rdf-app` until that side moves — which is STORE-T-0041's proposal, filed in
+  that repo and sequenced by it.

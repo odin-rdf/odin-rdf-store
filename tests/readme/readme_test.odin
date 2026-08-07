@@ -9,7 +9,6 @@ import "core:fmt"
 import "core:io"
 import "core:os"
 import "core:strings"
-import "core:sync"
 import "core:testing"
 
 import "rdf:rdf"
@@ -30,13 +29,13 @@ ex:alice ex:knows ex:bob ;
 ex:bob ex:knows ex:carol .
 `
 
-// Export is match + decode + emit: there is no export API in v1.
+// Export is match + decode + emit: there is no export API in v1. The
+// store here is the README's ephemeral one — the export example names
+// no store of its own, and this is the constructor a throwaway one
+// wants.
 @(test)
 readme_export_example :: proc(t: ^testing.T) {
-	path := readme_db_path()
-	defer remove_readme_db(path)
-
-	s, open_err := kvstore.open(path)
+	s, open_err := kvstore.open_ephemeral()
 	testing.expect(t, open_err == nil)
 	defer kvstore.close(s)
 
@@ -107,31 +106,19 @@ readme_persistent_example :: proc(t: ^testing.T) {
 	testing.expect_value(t, matched, 2)
 }
 
-// The separator is added here rather than assumed: macOS exports TMPDIR with
-// a trailing slash and Linux usually exports nothing, so concatenating onto
-// the variable yields a path at the filesystem root on Linux. Windows names
-// the variable TEMP or TMP.
-// A pid alone stopped being unique when the in-memory example became a
-// second persistent one (STORE-T-0030): two tests on ten threads, one path,
-// and the second open fails on a directory that already exists.
-@(private = "file")
-readme_db_counter: u64
-
+// The persistent example names a literal path in the README, so it
+// keeps a real one here — an ephemeral store is exactly the thing that
+// example is not about. The path comes from core:os rather than from a
+// scheme of this file's own: a pid alone stopped being unique when the
+// in-memory example became a second persistent one (STORE-T-0030) —
+// two tests on ten threads, one path, and the second open fails on a
+// directory that already exists. make_directory_temp wins the name
+// with mkdir instead of computing it (STORE-T-0033).
 @(private = "file")
 readme_db_path :: proc() -> string {
-	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	if tmp == "" {
-		tmp = os.get_env("TEMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = os.get_env("TMP", context.temp_allocator)
-	}
-	if tmp == "" {
-		tmp = "/tmp"
-	}
-	tmp = strings.trim_right(tmp, `/\`)
-	n := sync.atomic_add(&readme_db_counter, 1)
-	return fmt.aprintf("%s/odin-rdf-store-readme-%d-%d", tmp, os.get_pid(), n)
+	path, err := os.make_directory_temp("", "odin-rdf-store-readme-*", context.allocator)
+	assert(err == nil, "the OS temp directory must be writable")
+	return path
 }
 
 @(private = "file")

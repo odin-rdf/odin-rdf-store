@@ -9,20 +9,9 @@ import "rdf:rdf"
 import lmdb "../../vendor/lmdb"
 import store ".."
 
-// with_store opens a fresh store in a temp directory; shared by this
-// package's test files.
-@(private)
-with_store :: proc(name: string) -> (path: string, s: ^Store) {
-	path = test_db_path(name)
-	opened, err := open(path)
-	assert(err == nil, "test store must open")
-	return path, opened
-}
-
 @(test)
 test_dict_intern_twice_same_id :: proc(t: ^testing.T) {
-	path, s := with_store("dict-twice")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	iri, err := intern_term(s, rdf.IRI("http://example.org/a"))
@@ -48,8 +37,7 @@ test_dict_intern_twice_same_id :: proc(t: ^testing.T) {
 
 @(test)
 test_dict_literal_distinctions_and_round_trip :: proc(t: ^testing.T) {
-	path, s := with_store("dict-lit")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	arena: mem.Dynamic_Arena
@@ -99,8 +87,7 @@ test_dict_literal_distinctions_and_round_trip :: proc(t: ^testing.T) {
 test_dict_lookup_outlives_store :: proc(t: ^testing.T) {
 	// The copying-lookup contract: a decoded term owns nothing of the
 	// store and survives its close.
-	path, s := with_store("dict-outlive")
-	defer remove_test_db(path)
+	s := scratch_store()
 
 	arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&arena)
@@ -147,8 +134,7 @@ test_dict_reopen_stability :: proc(t: ^testing.T) {
 test_dict_exact_bytes :: proc(t: ^testing.T) {
 	// Pins STORE-A-0003 §§2-4 literally: exact id2term and term2id
 	// bytes for known terms, not just behavioral round-trips.
-	path, s := with_store("dict-bytes")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	iri_id, _ := intern_term(s, rdf.IRI("http://example.org/a")) // first intern: IRI counter 0
@@ -202,8 +188,7 @@ test_dict_hash_collision_rejected :: proc(t: ^testing.T) {
 	// Plants a colliding term2id entry directly: the key for content B
 	// mapped to the ID of content A. Interning B then hits the key,
 	// fails verification against id2term, and must reject.
-	path, s := with_store("dict-collision")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	a_id, _ := intern_term(s, rdf.IRI("collision-a"))
@@ -225,8 +210,7 @@ test_dict_hash_collision_rejected :: proc(t: ^testing.T) {
 
 @(test)
 test_dict_language_too_long :: proc(t: ^testing.T) {
-	path, s := with_store("dict-lang")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	long := strings.repeat("x", 256)
@@ -242,8 +226,7 @@ test_dict_language_too_long :: proc(t: ^testing.T) {
 
 @(test)
 test_dict_graph_labels_and_quads :: proc(t: ^testing.T) {
-	path, s := with_store("dict-graphs")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	arena: mem.Dynamic_Arena
@@ -330,8 +313,7 @@ test_dict_find_term_in_write_txn :: proc(t: ^testing.T) {
 	// find_term_txn is transaction-agnostic: inside a write transaction
 	// it sees that transaction's own uncommitted assignments, which is
 	// what a loader interleaving finds and interns needs.
-	path, s := with_store("dict-find-txn")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	txn: ^lmdb.Txn
@@ -357,8 +339,7 @@ test_dict_find_term_long_language :: proc(t: ^testing.T) {
 	// Interning a literal whose language tag overflows the format's
 	// one-byte field is an error; finding one is simply not-found, since
 	// no stored literal can carry it.
-	path, s := with_store("dict-find-lang")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	long := strings.repeat("x", 256)
@@ -375,8 +356,7 @@ test_dict_find_term_long_language :: proc(t: ^testing.T) {
 
 @(test)
 test_dict_fresh_blank :: proc(t: ^testing.T) {
-	path, s := with_store("dict-fresh")
-	defer remove_test_db(path)
+	s := scratch_store()
 	defer close(s)
 
 	// Take the "b0" label first, so fresh_blank must skip it.

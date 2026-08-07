@@ -13,16 +13,16 @@ import store ".."
 
 @(private = "file")
 Lmdb_Backend :: struct {
-	path: string,
-	s:    ^Store,
+	s: ^Store,
 }
 
+// The suite runs over an ephemeral store: this is the check that
+// open_ephemeral is a constructor and not a change to the match
+// contract (STORE-T-0033). Nothing below distinguishes the two
+// constructors, which is the point.
 @(private = "file")
-lmdb_backend_init :: proc(m: ^Lmdb_Backend, name: string) -> conformance.Backend {
-	m.path = test_db_path(name)
-	s, err := open(m.path)
-	assert(err == nil, "test store must open")
-	m.s = s
+lmdb_backend_init :: proc(m: ^Lmdb_Backend) -> conformance.Backend {
+	m.s = scratch_store()
 	return conformance.Backend {
 		ctx = m,
 		insert = proc(ctx: rawptr, q: store.Encoded_Quad) -> bool {
@@ -89,13 +89,12 @@ lmdb_backend_init :: proc(m: ^Lmdb_Backend, name: string) -> conformance.Backend
 @(private = "file")
 lmdb_backend_destroy :: proc(m: ^Lmdb_Backend) {
 	close(m.s)
-	remove_test_db(m.path)
 }
 
 @(test)
 test_lmdb_all_16_patterns :: proc(t: ^testing.T) {
 	m: Lmdb_Backend
-	b := lmdb_backend_init(&m, "conf-16")
+	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	conformance.check_all_16_patterns(t, &b)
 }
@@ -103,7 +102,7 @@ test_lmdb_all_16_patterns :: proc(t: ^testing.T) {
 @(test)
 test_lmdb_set_semantics :: proc(t: ^testing.T) {
 	m: Lmdb_Backend
-	b := lmdb_backend_init(&m, "conf-set")
+	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	conformance.check_set_semantics(t, &b)
 }
@@ -111,7 +110,7 @@ test_lmdb_set_semantics :: proc(t: ^testing.T) {
 @(test)
 test_lmdb_empty_dataset :: proc(t: ^testing.T) {
 	m: Lmdb_Backend
-	b := lmdb_backend_init(&m, "conf-empty")
+	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	conformance.check_empty_dataset(t, &b)
 }
@@ -119,7 +118,7 @@ test_lmdb_empty_dataset :: proc(t: ^testing.T) {
 @(test)
 test_lmdb_no_match_and_exhaustion :: proc(t: ^testing.T) {
 	m: Lmdb_Backend
-	b := lmdb_backend_init(&m, "conf-nomatch")
+	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	conformance.check_no_match_and_exhaustion(t, &b)
 }
@@ -127,7 +126,7 @@ test_lmdb_no_match_and_exhaustion :: proc(t: ^testing.T) {
 @(test)
 test_lmdb_default_vs_named_graphs :: proc(t: ^testing.T) {
 	m: Lmdb_Backend
-	b := lmdb_backend_init(&m, "conf-graphs")
+	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	conformance.check_default_vs_named_graphs(t, &b)
 }
@@ -135,7 +134,7 @@ test_lmdb_default_vs_named_graphs :: proc(t: ^testing.T) {
 @(test)
 test_lmdb_find_term :: proc(t: ^testing.T) {
 	m: Lmdb_Backend
-	b := lmdb_backend_init(&m, "conf-find")
+	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	conformance.check_find_term(t, &b)
 }
@@ -146,7 +145,7 @@ test_lmdb_find_term :: proc(t: ^testing.T) {
 @(test)
 test_lmdb_index_key_bytes :: proc(t: ^testing.T) {
 	m: Lmdb_Backend
-	b := lmdb_backend_init(&m, "idx-bytes")
+	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	_ = b
 
@@ -187,7 +186,7 @@ test_lmdb_prefix_boundary :: proc(t: ^testing.T) {
 	// bleed into each other's range scans, including for the highest
 	// graph present.
 	m: Lmdb_Backend
-	b := lmdb_backend_init(&m, "idx-boundary")
+	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	_ = b
 

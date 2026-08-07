@@ -9,6 +9,31 @@ initiatives, and the ADRs each entry cites.
 
 ## Unreleased
 
+### Added
+
+- **`kvstore.open_ephemeral`** — a store with no path the caller has to name, make unique,
+  or clean up, and which does not outlive the process (`STORE-T-0033`). Same contract and
+  same procedure set as `open`; only the storage's lifetime differs. The database is one
+  file with no lock file (`NOSUBDIR | NOLOCK | NOSYNC`), unlinked as soon as it is open on
+  POSIX — invisible for the store's whole life and reclaimed by the kernel on close *or on
+  crash*. Windows has no unlink-while-open, so the file lives until `close` deletes it and
+  an abnormal termination leaks exactly one file.
+
+  Its default `EPHEMERAL_OPTIONS` carries a **16 MiB** map rather than `DEFAULT_OPTIONS`'
+  1 GiB, and that is the part that pays for the procedure. LMDB has no sparse-file
+  handling on Windows, so every `open` there materializes `map_size` on disk in full; a
+  suite that opens a store per test spends CI minutes writing files it never reads. The
+  16 MiB is measured, not chosen: the largest single document vendored anywhere in the
+  family leaves a 288 KiB high-water mark, and an entire suite tree loaded into one store
+  leaves 2.03 MiB.
+
+  This partly answers 0.2.0's "every dataset is a filesystem path" consequence below:
+  every dataset still *is* one, but a scratch dataset no longer makes that the caller's
+  problem.
+
+- `Store_Error.Temp_Unavailable`, for an `open_ephemeral` that could find no writable
+  temporary location.
+
 ## 0.2.0
 
 ### Removed

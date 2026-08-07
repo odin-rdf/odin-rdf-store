@@ -14,8 +14,8 @@ package kvstore
 // in-memory backend was retired (STORE-A-0006, STORE-T-0028). It lives
 // here rather than in `conformance` because it was never part of the
 // backend-agnostic suite: it drives a backend's procedures directly
-// rather than through the Backend adapter, and it needs this package's
-// temp-database helpers. `conformance` is now the harness alone.
+// rather than through the Backend adapter. `conformance` is now the
+// harness alone.
 //
 // One difference from the in-memory original, and it is the reason every
 // decode below takes an allocator: memstore's lookup_term borrowed from
@@ -54,7 +54,6 @@ Reload :: proc(s: ^Store, source: string)
 @(private = "file")
 check_roundtrip :: proc(
 	t: ^testing.T,
-	name: string,
 	fixture: string,
 	load: Reload,
 	export: proc(s: ^Store) -> string,
@@ -62,20 +61,14 @@ check_roundtrip :: proc(
 ) {
 	defer free_all(context.temp_allocator)
 
-	path_a := test_db_path(strings.concatenate({name, "-a"}, context.temp_allocator))
-	defer remove_test_db(path_a)
-	sa, err_a := open(path_a)
-	assert(err_a == nil, "test store must open")
+	sa := scratch_store()
 	defer close(sa)
 	load(sa, fixture)
 
 	exported := export(sa)
 	defer delete(exported)
 
-	path_b := test_db_path(strings.concatenate({name, "-b"}, context.temp_allocator))
-	defer remove_test_db(path_b)
-	sb, err_b := open(path_b)
-	assert(err_b == nil, "test store must open")
+	sb := scratch_store()
 	defer close(sb)
 	reload(sb, exported)
 
@@ -146,7 +139,7 @@ test_roundtrip_ntriples :: proc(t: ^testing.T) {
 		}
 		return strings.to_string(sb)
 	}
-	check_roundtrip(t, "rt-nt", TRIPLE_FIXTURE, nt_load, export, nt_load)
+	check_roundtrip(t, TRIPLE_FIXTURE, nt_load, export, nt_load)
 }
 
 @(test)
@@ -164,7 +157,7 @@ test_roundtrip_nquads :: proc(t: ^testing.T) {
 		}
 		return strings.to_string(sb)
 	}
-	check_roundtrip(t, "rt-nq", QUAD_FIXTURE, nq_load, export, nq_load)
+	check_roundtrip(t, QUAD_FIXTURE, nq_load, export, nq_load)
 }
 
 @(test)
@@ -186,7 +179,7 @@ test_roundtrip_turtle :: proc(t: ^testing.T) {
 		assert(turtle_fmt.emitter_finish(&e) == nil)
 		return strings.to_string(sb)
 	}
-	check_roundtrip(t, "rt-ttl", TRIPLE_FIXTURE, nt_load, export, ttl_load)
+	check_roundtrip(t, TRIPLE_FIXTURE, nt_load, export, ttl_load)
 }
 
 @(test)
@@ -208,5 +201,5 @@ test_roundtrip_trig :: proc(t: ^testing.T) {
 		assert(trig_fmt.emitter_finish(&e) == nil)
 		return strings.to_string(sb)
 	}
-	check_roundtrip(t, "rt-trig", QUAD_FIXTURE, nq_load, export, trig_load)
+	check_roundtrip(t, QUAD_FIXTURE, nq_load, export, trig_load)
 }

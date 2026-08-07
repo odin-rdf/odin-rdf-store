@@ -7,7 +7,7 @@ created_at: 2026-08-05T22:35:58.695768+00:00
 updated_at: 2026-08-05T22:35:58.695768+00:00
 parent: 
 blocked_by: []
-archived: false
+archived: true
 
 tags:
   - "#task"
@@ -74,6 +74,8 @@ day a consumer reads while another process writes — which the vision's
 - **User Value**: A query's answer is an answer about one dataset. Long-running reads stop being wrong in the presence of writers.
 - **Business Value**: It is the last structural correctness gap between the engine as tested (single-threaded suites) and the engine as deployed. Cheaper to get into the interface before three consumers have built around per-operation reads than after.
 - **Effort Estimate**: S for kvstore, M for memstore, L for the contract. LMDB is MVCC: a read transaction *is* a snapshot, and kvstore already opens one per operation — the work is holding one open across a query instead. memstore has no versioning at all, so an honest snapshot there is either copy-on-write indexes or a documented "no writer may run" precondition.
+
+## Acceptance Criteria
 
 ## Acceptance Criteria **[REQUIRED]**
 
@@ -143,3 +145,31 @@ to pass — which is a decision to make deliberately, not one to back into.
   closes the cursor and leaves the transaction alone. One cost is now the consumer's to know
   rather than the backend's to hide: an open read transaction pins pages, so a long snapshot
   makes a concurrent writer grow the file. Ready to decompose jointly with STORE-T-0022.
+
+- **2026-08-07 — Superseded by STORE-I-0004 and archived.** Promoted jointly with
+  STORE-T-0022, as the update above recommended, and archived only after that initiative was
+  decomposed into its eight tasks — not at promotion, so that this item's acceptance criteria
+  could be transcribed into the initiative's Exit Criteria rather than buried mid-transcription.
+
+  **Where each acceptance criterion went.** "A snapshot handle in the backend convention" and
+  "reads through one snapshot see one dataset" became the initiative's *transaction handle* and
+  *a read transaction is the snapshot* criteria — the concept survives, the vocabulary does
+  not, because STORE-A-0007 settled that a snapshot is a read-only `Txn` and nothing in the
+  interface says "snapshot". "`store/interface.odin` states the read model, and today's
+  per-operation reads remain valid" is verbatim an exit criterion, sharpened by autocommit
+  being *defined* rather than merely how it happens to work. "kvstore holds one LMDB read
+  transaction for the snapshot's life, with the long-reader cost documented" became the
+  page-pinning half of *the two costs are stated as contract*. The conformance criterion —
+  open a snapshot, insert through the dataset handle, assert the snapshot unchanged — is one of
+  STORE-T-0039's seven checks, and its parenthetical about specializing for a weaker backend is
+  gone with the backend that needed it.
+
+  **The one criterion that died rather than moved**: "memstore's answer decided and documented."
+  STORE-I-0003 deleted the question instead of answering it, which is what made this item's own
+  cost estimate — "L for the contract", against a two-backend contract — wrong by more than
+  half.
+
+  This item's evidence is untouched and is why the work exists: a query reads the store in five
+  distinct places and nothing today makes those five an answer about one dataset. That argument
+  now lives in STORE-I-0004's Context and, for the repo that has to act on it, in
+  STORE-T-0041's proposal to odin-rdf-sparql.
