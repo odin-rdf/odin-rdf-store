@@ -145,6 +145,14 @@ package store
 //     transaction instead is not equivalent; it is precisely the window
 //     the model closes.
 //
+// The bulk loaders are outside this contract — they are a backend's own
+// convenience over its parser, not part of the procedure set — but
+// kvstore gives them `_txn` forms on the same principle, with one
+// inversion worth knowing about if a second backend copies the shape:
+// a bare loader is atomic per document because it owns its transaction,
+// and a `_txn` loader **cannot be**, because ending the caller's
+// transaction is not its to do. See store/kvstore/load.odin.
+//
 // The _txn suffix marks what is really the primary API, which is
 // backwards, and it stays. The alternative is giving the transactional
 // forms the plain names, which renames every procedure the query and

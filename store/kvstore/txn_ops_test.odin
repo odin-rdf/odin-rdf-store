@@ -277,3 +277,184 @@ test_write_forms_refuse_a_read_transaction :: proc(t: ^testing.T) {
 	testing.expect(t, cerr == nil)
 	testing.expect_value(t, n, 0)
 }
+
+// The loaders' _txn forms (STORE-T-0038). What matters is the contract
+// inversion: a bare loader is atomic per document, and a _txn one
+// cannot be, because the transaction belongs to the caller.
+
+@(test)
+test_load_txn_is_visible_inside_and_gone_on_abort :: proc(t: ^testing.T) {
+	s := scratch_store()
+	defer close(s)
+
+	tx, err := txn_begin(s, .Write)
+	testing.expect(t, err == nil)
+
+	ttl := `@prefix ex: <http://example.org/> .
+ex:alice ex:knows ex:bob ; ex:name "Alice"@en .`
+	added, perr, lerr := load_turtle_txn(&tx, transmute([]u8)ttl)
+	testing.expect(t, lerr == nil)
+	testing.expect_value(t, perr.message, "")
+	testing.expect_value(t, added, 2)
+
+	// The candidate is readable through the transaction that built it —
+	// validate-before-commit, at document granularity.
+	n, cerr := count_txn(&tx)
+	testing.expect(t, cerr == nil)
+	testing.expect_value(t, n, 2)
+	it, merr := match_txn(&tx, store.MATCH_ALL)
+	testing.expect(t, merr == nil)
+	testing.expect_value(t, drain(&it), 2)
+	match_destroy(&it)
+
+	// And invisible outside it until the decision is taken.
+	outside, oerr := count(s)
+	testing.expect(t, oerr == nil)
+	testing.expect_value(t, outside, 0)
+
+	txn_abort(&tx)
+	after, aerr := count(s)
+	testing.expect(t, aerr == nil)
+	testing.expect_value(t, after, 0)
+}
+
+// The inversion, asserted rather than only documented: a parse error
+// leaves the caller's transaction dirty, and added says how dirty.
+// The bare loader on the same document persists nothing.
+@(test)
+test_load_txn_leaves_the_transaction_dirty_on_a_parse_error :: proc(t: ^testing.T) {
+	s := scratch_store()
+	defer close(s)
+
+	src := `<http://example.org/a> <http://example.org/p> "ok" .
+<http://example.org/b> <http://example.org/p> "ok too" .
+<http://example.org/c> <http://example.org/p> "missing dot"`
+
+	tx, err := txn_begin(s, .Write)
+	testing.expect(t, err == nil)
+
+	added, perr, lerr := load_triples_txn(&tx, transmute([]u8)src)
+	testing.expect(t, lerr == nil)
+	testing.expect(t, perr.message != "", "the document must fail to parse")
+	testing.expect_value(t, perr.line, 3)
+	// Not 0: the statements before the error are in the transaction, and
+	// added reports what was written rather than what survived.
+	testing.expect_value(t, added, 2)
+
+	n, cerr := count_txn(&tx)
+	testing.expect(t, cerr == nil)
+	testing.expect_value(t, n, 2)
+
+	// Aborting is the caller's job, and it is the caller's job that
+	// makes the outcome match the bare loader's.
+	txn_abort(&tx)
+	after, aerr := count(s)
+	testing.expect(t, aerr == nil)
+	testing.expect_value(t, after, 0)
+
+	// The bare form on the same document is atomic per document, so it
+	// needs no such care.
+	bare_added, bare_perr, bare_err := load_triples(s, transmute([]u8)src)
+	testing.expect(t, bare_err == nil)
+	testing.expect(t, bare_perr.message != "")
+	testing.expect_value(t, bare_added, 0)
+	bare_n, bcerr := count(s)
+	testing.expect(t, bcerr == nil)
+	testing.expect_value(t, bare_n, 0)
+}
+
+// Blank-node scoping is per load, not per transaction. Two loads of one
+// blank-node-dense document in a single transaction must double the
+// quad count, exactly as two separate loads do — this is the property
+// STORE-I-0003 found the shapes-graph trap in, and it must not quietly
+// change now that two loads can share a transaction.
+@(test)
+test_load_txn_scopes_blanks_per_load_not_per_transaction :: proc(t: ^testing.T) {
+	s := scratch_store()
+	defer close(s)
+
+	src := `_:b0 <http://example.org/p> "x" .
+_:b0 <http://example.org/q> _:b1 .`
+
+	tx, err := txn_begin(s, .Write)
+	testing.expect(t, err == nil)
+
+	first, perr1, lerr1 := load_triples_txn(&tx, transmute([]u8)src)
+	testing.expect(t, lerr1 == nil)
+	testing.expect_value(t, perr1.message, "")
+	testing.expect_value(t, first, 2)
+
+	second, perr2, lerr2 := load_triples_txn(&tx, transmute([]u8)src)
+	testing.expect(t, lerr2 == nil)
+	testing.expect_value(t, perr2.message, "")
+	// Fresh blanks in the second load, so nothing dedupes.
+	testing.expect_value(t, second, 2)
+
+	n, cerr := count_txn(&tx)
+	testing.expect(t, cerr == nil)
+	testing.expect_value(t, n, 4)
+
+	testing.expect(t, txn_commit(&tx) == nil)
+
+	// Ground statements, by contrast, dedupe across loads in one
+	// transaction — set semantics is unaffected by the scoping.
+	ground := `<http://example.org/a> <http://example.org/p> "x" .`
+	tx2, err2 := txn_begin(s, .Write)
+	testing.expect(t, err2 == nil)
+	defer txn_abort(&tx2)
+	g1, _, _ := load_triples_txn(&tx2, transmute([]u8)ground)
+	g2, _, _ := load_triples_txn(&tx2, transmute([]u8)ground)
+	testing.expect_value(t, g1, 1)
+	testing.expect_value(t, g2, 0)
+}
+
+// All four formats reach their _txn form, and a graph label threads
+// through the two that take one.
+@(test)
+test_load_txn_all_four_formats :: proc(t: ^testing.T) {
+	s := scratch_store()
+	defer close(s)
+
+	tx, err := txn_begin(s, .Write)
+	testing.expect(t, err == nil)
+	defer txn_abort(&tx)
+
+	nt := `<http://example.org/alice> <http://example.org/knows> <http://example.org/bob> .`
+	a1, p1, e1 := load_triples_txn(&tx, transmute([]u8)nt, rdf.IRI(EX + "g"))
+	testing.expect(t, e1 == nil)
+	testing.expect_value(t, p1.message, "")
+	testing.expect_value(t, a1, 1)
+
+	ttl := `@prefix ex: <http://example.org/> .
+ex:alice ex:age 42 .`
+	a2, p2, e2 := load_turtle_txn(&tx, transmute([]u8)ttl, "", rdf.IRI(EX + "g"))
+	testing.expect(t, e2 == nil)
+	testing.expect_value(t, p2.message, "")
+	testing.expect_value(t, a2, 1)
+
+	nq := `<http://example.org/s> <http://example.org/p> "chat"@fr <http://example.org/g1> .`
+	a3, p3, e3 := load_quads_txn(&tx, transmute([]u8)nq)
+	testing.expect(t, e3 == nil)
+	testing.expect_value(t, p3.message, "")
+	testing.expect_value(t, a3, 1)
+
+	trig := `@prefix ex: <http://example.org/> .
+ex:g2 { ex:s2 ex:p ex:o . }`
+	a4, p4, e4 := load_trig_txn(&tx, transmute([]u8)trig)
+	testing.expect(t, e4 == nil)
+	testing.expect_value(t, p4.message, "")
+	testing.expect_value(t, a4, 1)
+
+	n, cerr := count_txn(&tx)
+	testing.expect(t, cerr == nil)
+	testing.expect_value(t, n, 4)
+
+	// The graph parameter landed: the two triple loads went to ex:g.
+	gid, found, ferr := find_graph_label_txn(&tx, rdf.Graph_Label(rdf.IRI(EX + "g")))
+	testing.expect(t, ferr == nil)
+	testing.expect(t, found)
+	named, merr := match_txn(&tx, store.Match_Pattern{store.WILDCARD, store.WILDCARD, store.WILDCARD, gid})
+	testing.expect(t, merr == nil)
+	testing.expect_value(t, drain(&named), 2)
+	match_destroy(&named)
+}

@@ -15,13 +15,28 @@ import store ".."
 // statement's terms with per-load blank-node scoping, nothing borrowed
 // from a statement surviving the iteration (RDF-A-0001).
 //
-// Each document loads inside ONE write transaction (STORE-I-0002
-// decision 2), which makes a load atomic per document: on a parse (or
-// storage) error the transaction aborts and NOTHING persists — a
-// deliberate divergence from the in-memory loader, which keeps
-// already-inserted statements. Loaders are package conveniences
-// outside the shared contract; the transaction makes the stronger
-// semantics free.
+// Two forms of each loader, and **they differ in exactly one thing that
+// a reader will get backwards if it is not said plainly**:
+//
+//   - load_* opens its own write transaction, so a load is **atomic per
+//     document** (STORE-I-0002 decision 2): on a parse or storage error
+//     the transaction aborts and NOTHING persists — a deliberate
+//     divergence from the in-memory loader, which kept already-inserted
+//     statements.
+//   - load_*_txn loads through the **caller's** transaction and does no
+//     transaction management at all. It therefore **cannot** be atomic
+//     per document: on a parse error the statements that parsed before
+//     it are already written into that transaction, and **aborting is
+//     the caller's job**. added reports what was written rather than 0,
+//     because that is what is true.
+//
+// That is the correct division — a procedure handed someone else's
+// transaction has no business ending it — but it is the exact opposite
+// of what the bare form promises, so read the form you are calling.
+//
+// Blank-node scoping is per **load**, not per transaction: two
+// load_*_txn calls in one transaction mint distinct blank nodes for the
+// same `_:b0`, exactly as two separate loads do.
 //
 // Results separate the two failure worlds: parse_err reports the
 // document's syntax error with the parser's position (message "" on
@@ -30,8 +45,46 @@ import store ".."
 // load_triples ingests an N-Triples document into a graph of the
 // store (default graph unless a target graph label is given). Returns
 // the number of quads newly added — duplicates don't count.
+//
+// Atomic per document, in its own write transaction: a parse error
+// persists nothing. Fails with .Write_Txn_Open if the caller already
+// holds a write transaction — that caller wants load_triples_txn.
 load_triples :: proc(
 	s: ^Store,
+	source: []byte,
+	graph: rdf.Graph_Label = nil,
+	allocator := context.allocator,
+) -> (
+	added: int,
+	parse_err: store.Load_Error,
+	err: Error,
+) {
+	tx := txn_begin(s, .Write) or_return
+	// txn_commit zeroes the handle, so this aborts only if the commit
+	// below was not reached — including on the parse-error return.
+	defer txn_abort(&tx)
+
+	added, parse_err = load_triples_txn(&tx, source, graph, allocator) or_return
+	if parse_err.message != "" {
+		return 0, parse_err, nil
+	}
+	txn_commit(&tx) or_return
+	return added, {}, nil
+}
+
+// load_triples_txn is load_triples through the caller's write
+// transaction, doing no transaction management of its own.
+//
+// **Not atomic per document.** A parse error leaves every statement
+// that parsed before it written into the caller's transaction, and
+// added reports how many. **Aborting is the caller's job** — which is
+// exactly what a consumer building a candidate for validation wants,
+// since it has to decide about the whole transaction anyway.
+//
+// Blank-node scoping is per call: two of these in one transaction give
+// the same `_:b0` two distinct blank nodes.
+load_triples_txn :: proc(
+	t: ^Txn,
 	source: []byte,
 	graph: rdf.Graph_Label = nil,
 	allocator := context.allocator,
@@ -44,20 +97,18 @@ load_triples :: proc(
 	triples_fmt.parser_init(&p, source, allocator)
 	defer triples_fmt.parser_destroy(&p)
 
-	tx, scope := load_begin(s, allocator) or_return
+	scope := load_scope_make(allocator)
 	defer load_scope_destroy(&scope)
-	// txn_commit zeroes the handle, so this aborts only if the commit
-	// below was not reached.
-	defer txn_abort(&tx)
 
-	target := intern_graph_label_txn(&tx, graph) or_return
-	for t in triples_fmt.parser_next(&p) {
-		scope_insert_triple(&tx, &scope, t, target) or_return
+	target := intern_graph_label_txn(t, graph) or_return
+	for statement in triples_fmt.parser_next(&p) {
+		scope_insert_triple(t, &scope, statement, target) or_return
 	}
 	if p.err.kind != .None {
-		return 0, load_parse_error(triples_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
+		return scope.added,
+			load_parse_error(triples_fmt.error_message(p.err.kind), p.err.line, p.err.column),
+			nil
 	}
-	txn_commit(&tx) or_return
 	return scope.added, {}, nil
 }
 
@@ -74,24 +125,46 @@ load_turtle :: proc(
 	parse_err: store.Load_Error,
 	err: Error,
 ) {
+	tx := txn_begin(s, .Write) or_return
+	defer txn_abort(&tx)
+
+	added, parse_err = load_turtle_txn(&tx, source, base, graph, allocator) or_return
+	if parse_err.message != "" {
+		return 0, parse_err, nil
+	}
+	txn_commit(&tx) or_return
+	return added, {}, nil
+}
+
+// load_turtle_txn is load_turtle through the caller's write
+// transaction; see load_triples_txn for what that changes.
+load_turtle_txn :: proc(
+	t: ^Txn,
+	source: []byte,
+	base := "",
+	graph: rdf.Graph_Label = nil,
+	allocator := context.allocator,
+) -> (
+	added: int,
+	parse_err: store.Load_Error,
+	err: Error,
+) {
 	p: turtle_fmt.Parser
 	turtle_fmt.parser_init(&p, source, base, allocator)
 	defer turtle_fmt.parser_destroy(&p)
 
-	tx, scope := load_begin(s, allocator) or_return
+	scope := load_scope_make(allocator)
 	defer load_scope_destroy(&scope)
-	// txn_commit zeroes the handle, so this aborts only if the commit
-	// below was not reached.
-	defer txn_abort(&tx)
 
-	target := intern_graph_label_txn(&tx, graph) or_return
-	for t in turtle_fmt.parser_next(&p) {
-		scope_insert_triple(&tx, &scope, t, target) or_return
+	target := intern_graph_label_txn(t, graph) or_return
+	for statement in turtle_fmt.parser_next(&p) {
+		scope_insert_triple(t, &scope, statement, target) or_return
 	}
 	if p.err.kind != .None {
-		return 0, load_parse_error(turtle_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
+		return scope.added,
+			load_parse_error(turtle_fmt.error_message(p.err.kind), p.err.line, p.err.column),
+			nil
 	}
-	txn_commit(&tx) or_return
 	return scope.added, {}, nil
 }
 
@@ -106,23 +179,43 @@ load_quads :: proc(
 	parse_err: store.Load_Error,
 	err: Error,
 ) {
+	tx := txn_begin(s, .Write) or_return
+	defer txn_abort(&tx)
+
+	added, parse_err = load_quads_txn(&tx, source, allocator) or_return
+	if parse_err.message != "" {
+		return 0, parse_err, nil
+	}
+	txn_commit(&tx) or_return
+	return added, {}, nil
+}
+
+// load_quads_txn is load_quads through the caller's write transaction;
+// see load_triples_txn for what that changes.
+load_quads_txn :: proc(
+	t: ^Txn,
+	source: []byte,
+	allocator := context.allocator,
+) -> (
+	added: int,
+	parse_err: store.Load_Error,
+	err: Error,
+) {
 	p: quads_fmt.Parser
 	quads_fmt.parser_init(&p, source, allocator)
 	defer quads_fmt.parser_destroy(&p)
 
-	tx, scope := load_begin(s, allocator) or_return
+	scope := load_scope_make(allocator)
 	defer load_scope_destroy(&scope)
-	// txn_commit zeroes the handle, so this aborts only if the commit
-	// below was not reached.
-	defer txn_abort(&tx)
 
 	for q in quads_fmt.parser_next(&p) {
-		scope_insert_quad(&tx, &scope, q) or_return
+		scope_insert_quad(t, &scope, q) or_return
 	}
 	if p.err.kind != .None {
-		return 0, load_parse_error(quads_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
+		return scope.added,
+			load_parse_error(quads_fmt.error_message(p.err.kind), p.err.line, p.err.column),
+			nil
 	}
-	txn_commit(&tx) or_return
 	return scope.added, {}, nil
 }
 
@@ -138,23 +231,44 @@ load_trig :: proc(
 	parse_err: store.Load_Error,
 	err: Error,
 ) {
+	tx := txn_begin(s, .Write) or_return
+	defer txn_abort(&tx)
+
+	added, parse_err = load_trig_txn(&tx, source, base, allocator) or_return
+	if parse_err.message != "" {
+		return 0, parse_err, nil
+	}
+	txn_commit(&tx) or_return
+	return added, {}, nil
+}
+
+// load_trig_txn is load_trig through the caller's write transaction;
+// see load_triples_txn for what that changes.
+load_trig_txn :: proc(
+	t: ^Txn,
+	source: []byte,
+	base := "",
+	allocator := context.allocator,
+) -> (
+	added: int,
+	parse_err: store.Load_Error,
+	err: Error,
+) {
 	p: trig_fmt.Parser
 	trig_fmt.parser_init(&p, source, base, allocator)
 	defer trig_fmt.parser_destroy(&p)
 
-	tx, scope := load_begin(s, allocator) or_return
+	scope := load_scope_make(allocator)
 	defer load_scope_destroy(&scope)
-	// txn_commit zeroes the handle, so this aborts only if the commit
-	// below was not reached.
-	defer txn_abort(&tx)
 
 	for q in trig_fmt.parser_next(&p) {
-		scope_insert_quad(&tx, &scope, q) or_return
+		scope_insert_quad(t, &scope, q) or_return
 	}
 	if p.err.kind != .None {
-		return 0, load_parse_error(trig_fmt.error_message(p.err.kind), p.err.line, p.err.column), nil
+		return scope.added,
+			load_parse_error(trig_fmt.error_message(p.err.kind), p.err.line, p.err.column),
+			nil
 	}
-	txn_commit(&tx) or_return
 	return scope.added, {}, nil
 }
 
@@ -172,17 +286,14 @@ Load_Scope :: struct {
 	added:     int,
 }
 
-// load_begin claims the environment's single writer for the length of
-// the document, so a loader called while the caller holds a write
-// transaction fails with .Write_Txn_Open rather than deadlocking on
-// LMDB's writer lock. The claim is released by write_txn_commit or
-// write_txn_abort, which every loader below reaches on both paths.
+// load_scope_make opens one load's blank-node scope. One per _txn
+// call, which is what keeps scoping per load rather than per
+// transaction.
 @(private)
-load_begin :: proc(s: ^Store, allocator: runtime.Allocator) -> (tx: Txn, scope: Load_Scope, err: Error) {
-	tx = txn_begin(s, .Write) or_return
+load_scope_make :: proc(allocator: runtime.Allocator) -> (scope: Load_Scope) {
 	scope.allocator = allocator
 	scope.blanks = make(map[string]store.Term_ID, 8, allocator)
-	return tx, scope, nil
+	return scope
 }
 
 @(private)
