@@ -83,6 +83,64 @@ lmdb_backend_init :: proc(m: ^Lmdb_Backend) -> conformance.Backend {
 			}
 			return total
 		},
+
+		// Transactions. The handle the suite holds is a heap Txn, freed
+		// by whichever of commit/abort ends it — the same ownership the
+		// iterator pointers already have.
+		txn_begin = proc(ctx: rawptr, mode: store.Txn_Mode) -> (rawptr, bool) {
+			tx, err := txn_begin((^Lmdb_Backend)(ctx).s, mode)
+			if err != nil {
+				// A refusal is a legitimate answer here, so the error is
+				// reported rather than asserted away.
+				return nil, false
+			}
+			handle := new(Txn)
+			handle^ = tx
+			return handle, true
+		},
+		txn_commit = proc(txn: rawptr) -> bool {
+			handle := (^Txn)(txn)
+			err := txn_commit(handle)
+			free(handle)
+			return err == nil
+		},
+		txn_abort = proc(txn: rawptr) {
+			handle := (^Txn)(txn)
+			txn_abort(handle)
+			free(handle)
+		},
+		insert_txn = proc(txn: rawptr, q: store.Encoded_Quad) -> bool {
+			added, err := insert_txn((^Txn)(txn), q)
+			assert(err == nil)
+			return added
+		},
+		count_txn = proc(txn: rawptr) -> int {
+			n, err := count_txn((^Txn)(txn))
+			assert(err == nil)
+			return n
+		},
+		match_begin_txn = proc(txn: rawptr, pattern: store.Match_Pattern) -> rawptr {
+			it := new(Match_Iterator)
+			iter, err := match_txn((^Txn)(txn), pattern)
+			assert(err == nil)
+			it^ = iter
+			return it
+		},
+		intern_term_txn = proc(txn: rawptr, term: rdf.Term) -> store.Term_ID {
+			id, err := intern_term_txn((^Txn)(txn), term)
+			assert(err == nil)
+			return id
+		},
+		encode_quad_txn = proc(txn: rawptr, q: rdf.Quad) -> store.Encoded_Quad {
+			encoded, err := encode_quad_txn((^Txn)(txn), q)
+			assert(err == nil)
+			return encoded
+		},
+		find_term_txn = proc(txn: rawptr, term: rdf.Term) -> (store.Term_ID, bool) {
+			id, found, err := find_term_txn((^Txn)(txn), term)
+			assert(err == nil)
+			return id, found
+		},
 	}
 }
 
@@ -137,6 +195,74 @@ test_lmdb_find_term :: proc(t: ^testing.T) {
 	b := lmdb_backend_init(&m)
 	defer lmdb_backend_destroy(&m)
 	conformance.check_find_term(t, &b)
+}
+
+// The transaction body (STORE-A-0007 point 5, STORE-T-0039). Same
+// shape as the checks above: a fresh backend per check, no branch, no
+// skip.
+
+@(test)
+test_lmdb_txn_read_your_own_writes :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m)
+	defer lmdb_backend_destroy(&m)
+	conformance.check_txn_read_your_own_writes(t, &b)
+}
+
+@(test)
+test_lmdb_txn_writes_invisible_until_commit :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m)
+	defer lmdb_backend_destroy(&m)
+	conformance.check_txn_writes_invisible_until_commit(t, &b)
+}
+
+@(test)
+test_lmdb_txn_snapshot_unchanged_across_commit :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m)
+	defer lmdb_backend_destroy(&m)
+	conformance.check_txn_snapshot_unchanged_across_commit(t, &b)
+}
+
+@(test)
+test_lmdb_txn_abort_leaves_nothing :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m)
+	defer lmdb_backend_destroy(&m)
+	conformance.check_txn_abort_leaves_nothing(t, &b)
+}
+
+@(test)
+test_lmdb_txn_single_writer :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m)
+	defer lmdb_backend_destroy(&m)
+	conformance.check_txn_single_writer(t, &b)
+}
+
+@(test)
+test_lmdb_txn_iterator_lifetime :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m)
+	defer lmdb_backend_destroy(&m)
+	conformance.check_txn_iterator_lifetime(t, &b)
+}
+
+@(test)
+test_lmdb_txn_autocommit :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m)
+	defer lmdb_backend_destroy(&m)
+	conformance.check_txn_autocommit(t, &b)
+}
+
+@(test)
+test_lmdb_validate_before_commit :: proc(t: ^testing.T) {
+	m: Lmdb_Backend
+	b := lmdb_backend_init(&m)
+	defer lmdb_backend_destroy(&m)
+	conformance.check_validate_before_commit(t, &b)
 }
 
 // White-box checks beyond the shared suite: exact index-key bytes and

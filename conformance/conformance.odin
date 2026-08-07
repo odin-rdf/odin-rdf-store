@@ -42,6 +42,33 @@ Backend :: struct {
 	// to, across all kinds — the observable check_find_term watches to
 	// prove a failed find assigned nothing.
 	dict_size:     proc(ctx: rawptr) -> int,
+
+	// Transactions (STORE-A-0007), asserted by transactions.odin.
+	//
+	// The handle is opaque exactly as match_begin's iterator is: the
+	// suite never names a backend's transaction type, and the adapter
+	// owns whatever it hands back until commit or abort ends it.
+	//
+	// **This is the whole of the growth: procedure pointers and nothing
+	// else.** No capability field, no tier, no skip list. A backend
+	// either passes the transaction checks or does not implement the
+	// interface — which is what STORE-A-0002 point 3 always claimed the
+	// suite was, and what it would stop being the moment the contract
+	// carried something the suite had to branch on.
+	//
+	// txn_begin reports ok=false when the backend refuses, which the
+	// single-writer check needs and which deliberately says nothing
+	// about *why*: an error taxonomy is a backend's own business.
+	txn_begin:       proc(ctx: rawptr, mode: store.Txn_Mode) -> (txn: rawptr, ok: bool),
+	txn_commit:      proc(txn: rawptr) -> bool,
+	txn_abort:       proc(txn: rawptr),
+	insert_txn:      proc(txn: rawptr, q: store.Encoded_Quad) -> bool,
+	count_txn:       proc(txn: rawptr) -> int,
+	// Yields the same opaque iterator match_next and match_destroy take.
+	match_begin_txn: proc(txn: rawptr, pattern: store.Match_Pattern) -> rawptr,
+	intern_term_txn: proc(txn: rawptr, term: rdf.Term) -> store.Term_ID,
+	encode_quad_txn: proc(txn: rawptr, q: rdf.Quad) -> store.Encoded_Quad,
+	find_term_txn:   proc(txn: rawptr, term: rdf.Term) -> (store.Term_ID, bool),
 }
 
 // fixture_quads encodes a dataset spanning the contract's edge cases:

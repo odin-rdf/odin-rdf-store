@@ -3,15 +3,15 @@ id: conformance-transaction-assertions
 level: task
 title: "Conformance: transaction assertions as one uniform body, and validate-before-commit demonstrated"
 short_code: "STORE-T-0039"
-created_at: 2026-08-07T22:15:16.000000+00:00
-updated_at: 2026-08-07T22:15:16.000000+00:00
+created_at: 2026-08-07T22:15:16+00:00
+updated_at: 2026-08-07T23:48:16.218422+00:00
 parent: STORE-I-0004
-blocked_by: ["STORE-T-0035", "STORE-T-0036", "STORE-T-0037"]
+blocked_by: [STORE-T-0035, STORE-T-0036, STORE-T-0037]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -38,10 +38,12 @@ STORE-A-0005 would have made the suite conditional forever; STORE-I-0003 removed
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] `conformance.Backend` grows transactional procedure pointers — begin, commit, abort, and
+- [x] `conformance.Backend` grows transactional procedure pointers — begin, commit, abort, and
       the `_txn` operations the checks need. **No capability field. No tier. No skip.**
-- [ ] The seven checks of STORE-A-0007 point 5, each its own named check procedure in the
-      shared suite, each run against kvstore at **both `Term_ID` widths**:
+- [x] The seven checks of STORE-A-0007 point 5, each its own named check procedure in the
+      shared suite, each run against kvstore at **both `Term_ID` widths**. Two are narrower
+      than the list below and the status update says why — the iterator one, and the
+      single-writer one:
   - read-your-own-writes inside a write transaction;
   - invisibility of those writes to a reader outside it, until commit;
   - a read transaction unchanged across a concurrent commit;
@@ -49,7 +51,7 @@ STORE-A-0005 would have made the suite conditional forever; STORE-I-0003 removed
   - a second write transaction refused;
   - an iterator invalidated by a write through its own transaction;
   - autocommit behaving as the one-operation transaction it is now defined to be.
-- [ ] **Validate-before-commit demonstrated as a test, not described.** Build a candidate
+- [x] **Validate-before-commit demonstrated as a test, not described.** Build a candidate
       inside a write transaction, read the dataset it *would* produce through that same
       transaction, and commit or abort on the answer — including the case that matters: a
       constraint that must see **pre-existing** data, which is precisely what the
@@ -57,15 +59,16 @@ STORE-A-0005 would have made the suite conditional forever; STORE-I-0003 removed
       so the "validator" here is a match-based predicate over the transaction; what is being
       demonstrated is that the *reads see the right dataset*, which is the whole of the P0 gap.
       **This is the criterion the initiative's P0 stands or falls on.**
-- [ ] **The negative that must stay absent**: no assertion covers whether a term interned
+- [x] **The negative that must stay absent**: no assertion covers whether a term interned
       inside an aborted transaction remains interned. Atomicity is defined over quads, not over
       the dictionary, and the suite must not accidentally grow a check that promises otherwise.
       Recorded as a comment in the suite so a later reader does not add one as an oversight.
-- [ ] The existing sixteen-pattern, set-semantics, empty-dataset, graph and `find_term` checks
+- [x] The existing sixteen-pattern, set-semantics, empty-dataset, graph and `find_term` checks
       are untouched and still pass — the transactional body is added beside them, not woven
       through them.
-- [ ] `make test` green at both `Term_ID` widths; `make check` clean; CI green on Linux, macOS
-      and Windows.
+- [x] `make test` green at both `Term_ID` widths (56 → 64 in `store/kvstore`); `make check`
+      clean. **CI unverified** — nothing in this initiative has been pushed; the repo is four
+      commits ahead of `origin/main`. Carried to STORE-T-0040, which has the same criterion.
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
 
@@ -101,4 +104,56 @@ chose refusal over blocking), so it is the one check whose failure would most li
 
 ## Status Updates **[REQUIRED]**
 
-*To be added during implementation*
+- **2026-08-07 — Implemented. Six criteria met, one met narrower than written, one carried.
+  `make test` green at both widths, `store/kvstore` 56 → 64; `make check` clean.**
+
+  **The P0 check has teeth, and that was verified rather than assumed.** `check_validate_before_commit`
+  uses a *uniqueness* constraint — no two resources may share an email — because that is
+  exactly the shape the isolated-candidate workaround gets wrong: a candidate holding one
+  email is unique within itself no matter what, so a validator that can only see the candidate
+  approves a duplicate. Pre-existing committed data gives alice the address; candidate 1 takes
+  a free address and commits; candidate 2 takes alice's and is aborted, and it is invalid
+  *only* because the validator can see alice's quad through the same transaction that holds
+  the candidate.
+
+  To confirm the check would actually catch a regression, `holders` was temporarily mutated to
+  read through its own fresh transaction — the pre-transaction world. The result is the
+  documented failure mode, exactly: the validator counts 1 instead of 2, **approves the
+  duplicate**, and the conflicting quad ends up committed in the store. Four assertions fire.
+  The mutation was reverted; it is recorded here because "this test would fail if the property
+  broke" is otherwise a claim rather than a finding.
+
+  **Two checks are narrower than STORE-A-0007 point 5's list, both deliberately.**
+
+  *The iterator one.* Point 5 says "an iterator invalidated by a write through its own
+  transaction". The contract **forbids** that combination rather than defining it, so a check
+  that read a stale iterator would promise whatever the implementation happened to do — the
+  trap STORE-T-0037 already declined. `check_txn_iterator_lifetime` asserts the parts that
+  *are* defined and that a consumer actually needs: iterating before the write, and re-opening
+  after it to see the write. It also asserts that destroying one iterator does not end the
+  transaction its siblings read through, which is the borrowing property from T-0037 promoted
+  into the shared suite where it belongs.
+
+  *The single-writer one.* The refusal of a second `txn_begin(.Write)` is asserted, as is a
+  reader opening beside a writer and the claim being released on abort. **The autocommit
+  corollary is not, and cannot be through this adapter**: bare `insert` is a write transaction
+  and is refused the same way — the more important half, since that is where a consumer
+  holding a transaction would otherwise deadlock — but the adapter's write procedures report
+  no error, only whether the quad was new. Widening every write pointer for one check is worse
+  than the gap. The assertion lives in `store/kvstore/txn_test.odin`, where the error is in
+  hand, and both the check's doc comment and the adapter's say so.
+
+  **One bug in a check, caught by reading the contract rather than by the compiler.** The
+  first draft of `check_txn_single_writer` encoded a quad inside the transaction it then
+  aborted, and reused those `Term_ID`s in the next transaction — which is precisely what
+  "provisional IDs, discard them on abort" forbids. The check would have been asserting
+  something the contract calls invalid, and it would have passed, because LMDB's dictionary
+  happens to survive. Encoding moved into the surviving transaction.
+
+  **The negative is a comment at the top of the file, not an absence.** Nothing asserts
+  whether a term interned inside an aborted transaction stays interned, and the file says why
+  in the place a reader tempted to "fill the gap" would be looking.
+
+  `check_validate_before_commit`'s last assertion is careful about the same freedom: it looks
+  up `erin` and, *if* the dictionary remembers her, asserts only that no quad of hers survives.
+  It does not require that she be forgotten, and it does not require that she be remembered.
