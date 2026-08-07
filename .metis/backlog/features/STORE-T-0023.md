@@ -136,3 +136,10 @@ to do.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-07 — Created from a consumer design review.** The first application-shaped consumer of the family (`odin-rdf-app`) reached the update and delete half of its write path and found no operation to build them on. The specification was already written in `interface.odin`; this item is to implement it. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — memstore retired (STORE-A-0006, STORE-I-0003).** The Effort Estimate's
+  S-for-memstore half is void; kvstore's S–M (`mdb_del` across the three index databases,
+  dictionary entries deliberately kept) is the whole of it, and so is the M for the contract
+  and the conformance suite, still driven by the iterator-invalidation question. The
+  Implementation Notes' memstore paragraph — deletion from three sorted arrays, and the
+  `flush` / pending-buffer interaction — describes a package that no longer exists and is
+  left only as the record of how the design was reasoned about.

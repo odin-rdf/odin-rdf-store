@@ -94,3 +94,7 @@ only the graph-varying ones.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-05 — Created from odin-rdf-sparql SPARQL-T-0019**, the evaluation initiative's evidence consolidation. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — memstore retired (STORE-A-0006, STORE-I-0003).** The Effort Estimate holds
+  at S for the reason it gave, minus one backend: kvstore's indexes are graph-first, so
+  "every graph except DEFAULT_GRAPH" is still a range skip rather than a filter. Only the
+  "memstore's and kvstore's" phrasing is stale.

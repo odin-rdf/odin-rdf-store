@@ -96,9 +96,8 @@ readme_persistent_example :: proc(t: ^testing.T) {
 		if !ok {
 			break
 		}
-		// Unlike the in-memory dictionary's borrowed strings, a
-		// persistent lookup copies into the caller's allocator, so the
-		// term outlives the store and is the caller's to free.
+		// A lookup copies the term into the caller's allocator, so it
+		// outlives the store and is the caller's to free.
 		subject, lookup_err := kvstore.lookup_term(s, q[store.QUAD_S])
 		testing.expect(t, lookup_err == nil)
 		defer rdf.destroy(subject)

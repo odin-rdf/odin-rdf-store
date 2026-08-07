@@ -109,3 +109,8 @@ demand is acceptable and much cheaper to promise.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-05 — Created from odin-rdf-sparql SPARQL-T-0019**, the evaluation initiative's evidence consolidation. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — memstore retired (STORE-A-0006, STORE-I-0003).** The Effort Estimate's
+  "nearly free in both backends" is now a claim about kvstore alone: a cursor skipping from
+  one graph prefix to the next. The graph-list half keeps its S estimate; the memstore
+  clause and the permutation-index reasoning beside it are history. Graph nodes remain the
+  harder half, unaffected.

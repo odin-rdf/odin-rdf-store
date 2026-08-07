@@ -106,3 +106,10 @@ right in its ordering costs nothing.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-05 — Created from odin-rdf-sparql SPARQL-T-0019**, the evaluation initiative's evidence consolidation. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — memstore retired (STORE-A-0006, STORE-I-0003), and this item loses its
+  easy half.** The estimate paired an exact answer from memstore's sorted indexes with an
+  approximation from LMDB page counts or per-position counters. Only the approximation
+  remains, which makes the interface question sharper rather than softer: with one backend
+  there is no longer an implementation that could return an exact count, so whatever this
+  procedure promises must be satisfiable by an estimate. Worth settling before the planner
+  binds to it.

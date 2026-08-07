@@ -114,3 +114,12 @@ rather than the strongest the current backends happen to produce.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-05 — Created from odin-rdf-sparql SPARQL-T-0019**, the evaluation initiative's evidence consolidation. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — memstore retired (STORE-A-0006, STORE-I-0003); the two-backend halves of
+  this item are void.** The Effort Estimate's claim that the order is "arguably free" rested
+  on both backends already keeping it — memstore's sorted permutation indexes *and* LMDB's
+  cursor order. Only the LMDB half survives, and it survives intact: iteration order falls
+  out of the big-endian key rule (STORE-A-0001 point 6), which is why the estimate's
+  conclusion is unchanged even though half its evidence is gone. What is lost is the
+  cross-check: agreement between two independent implementations was the reason to believe
+  the order was a property of the *contract* rather than of LMDB. Deciding what to promise
+  is now a decision about LMDB alone.

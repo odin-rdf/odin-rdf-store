@@ -119,6 +119,10 @@ No per-record format stamps (the single `meta` format covers the file), no check
 - Blank labels stored are the loader's generated per-scope labels, not source-document labels (consistent with STORE-I-0001's scoping decision).
 - `DEFAULT_GRAPH` sorting after named graphs in the indexes is an artifact of the sentinel tag value; no code may rely on it beyond "contiguous range".
 
+## Amendments
+
+- **2026-08-07 — the in-memory backend this ADR compares against is retired (STORE-A-0006, STORE-I-0003); nothing in the format changes.** Four passages read as descriptions of a live peer and are now history: the Context note that "no code path computes both hashes — the in-memory backend uses Odin's built-in map hasher, the LMDB backend uses XXH3"; the Context line that "the index layout mirrors the in-memory backend's three graph-first permutations"; the Rationale that the parser's hash "was designed for in-memory tables"; and the Consequence that memcmp-ordered keys "preserve every property the in-memory backend established: kind clustering, prefix range scans, identical iteration order". They are left as written, because each records *why* a byte layout is the way it is, and that reasoning was true when the bytes were pinned. Two of them keep force on their own terms regardless: XXH3-128 is required by the 511-byte key limit and the ownership argument, neither of which mentions a second backend; and kind clustering and prefix range scans are properties of the big-endian key rule, so only the cross-backend *agreement* on iteration order is moot — see the matching annotation on STORE-A-0001 point 7. **Format version 1 is unaffected: no key, value, or meta byte changes, and no migration is implied.**
+
 ## Review Schedule **[CONDITIONAL: Temporary Decision]**
 
 ### Review Triggers

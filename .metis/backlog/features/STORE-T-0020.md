@@ -101,3 +101,12 @@ already parsed by `lookup_term`, just at a coarser granularity.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-05 — Created from odin-rdf-sparql SPARQL-T-0019**, the evaluation initiative's evidence consolidation. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — memstore retired (STORE-A-0006, STORE-I-0003); one acceptance criterion is
+  now unmeetable as written.** "Allocates nothing on either backend — this is on a match hot
+  path, and the in-memory backend already achieves it" has no second backend and no existing
+  proof. The zero-allocation requirement stands on its own merits and is achievable — reading
+  three big-endian IDs out of the `id2term` value, which `triple_canonical` already wrote in
+  that layout, needs no allocation — but it must now be *demonstrated* rather than inherited.
+  The User Value framing ("cost the same on the persistent backend as on the in-memory one")
+  goes with it: the comparison no longer exists, and the value is simply that a triple-term
+  pattern streams instead of materializing per candidate quad.

@@ -3,9 +3,9 @@
 [![CI](https://github.com/odin-rdf/odin-rdf-store/actions/workflows/ci.yml/badge.svg)](https://github.com/odin-rdf/odin-rdf-store/actions/workflows/ci.yml)
 
 RDF quad storage for Odin: a dataset of quads over a term dictionary,
-with **one match interface** and two backends behind it — `memstore`
-in memory and `kvstore` persistent over LMDB. Both pass the same
-conformance suite verbatim, at both `Term_ID` widths.
+with **one match interface** and `kvstore`, persistent over LMDB,
+behind it. It passes the conformance suite that is the executable form
+of that interface, at both `Term_ID` widths.
 
 This is the second layer of the family stack —
 [odin-rdf-parser](https://github.com/odin-rdf/odin-rdf-parser) (formats
@@ -18,16 +18,23 @@ consumers, not features.
 
 ## Packages
 
-| Package          | Description                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------- |
-| `store`          | The shared vocabulary: `Term_ID` encoding, `Encoded_Quad`, `Match_Pattern`, and the interface contract |
-| `store/memstore` | In-memory reference backend: dictionary, three permutation indexes, bulk loaders. No dependencies      |
-| `store/kvstore`  | Persistent backend over LMDB: same procedure set and semantics, durable on disk                        |
-| `conformance`    | The executable form of the contract — a backend-agnostic suite both backends instantiate               |
+| Package         | Description                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| `store`         | The shared vocabulary: `Term_ID` encoding, `Encoded_Quad`, `Match_Pattern`, and the interface contract |
+| `store/kvstore` | The backend over LMDB: dictionary, three permutation indexes, bulk loaders, durable on disk            |
+| `conformance`   | The executable form of the contract — a backend-agnostic suite that `kvstore` instantiates             |
 
-`store` contains no storage itself. The backends are peers of one
-interface, bound at compile time by which package you import: a program
-that only wants an in-memory dataset never links LMDB.
+`store` contains no storage itself. An in-memory backend came first and
+was the reference the interface was defined against; it was retired on
+2026-08-07 ([ADR STORE-A-0006](.metis/adrs/STORE-A-0006.md)) because no
+consumer outside the test suites ever asked for one, and because the
+transaction model the query and validation layers need came out shaped
+by accommodating it. Two consequences are worth stating plainly rather
+than leaving to be discovered: **every consumer of this library links
+LMDB**, and **every dataset is a filesystem path** — LMDB has no
+anonymous or in-memory mode. The `store` / `store/kvstore` split and the
+`conformance` adapter are kept so a second backend can be added on
+evidence.
 
 ## The match interface
 
@@ -37,8 +44,6 @@ dataset type (the full contract is in
 STORE-A-0002):
 
 ```odin
-dataset_init(ds, allocator)      // prepare an empty dataset
-dataset_destroy(ds)              // free everything the dataset owns
 insert(ds, quad) -> bool         // add a quad; false if already present
 count(ds) -> int                 // number of quads
 match(ds, pattern) -> iterator   // stream quads matching a pattern
@@ -49,10 +54,12 @@ match_destroy(&it)               // release iterator resources
 plus the term dictionary its IDs come from: `intern_term` (assign on
 first sight), `find_term` (lookup only, never assigns), `lookup_term`
 (the reverse direction), and the same three for the graph position.
-Backends that can fail against an environment — `kvstore` — also return
-an `Error` from the fallible procedures, and their init/destroy take
-what persistence requires (a path, options). The names, semantics, and
-iteration contract are what the convention fixes.
+Opening and closing a dataset is deliberately outside the set — it is
+where a backend's own nature shows, and `kvstore`'s is `open(path,
+opts)` / `close`. `kvstore`'s operations can fail against its
+environment, so its fallible procedures return an `Error`. The names,
+semantics, and iteration contract are what the convention fixes; the
+lifecycle is not.
 
 The contract in brief:
 
@@ -72,80 +79,25 @@ The contract in brief:
 
 ## Quick start
 
-### Load a document and match
+### Open a store, load a document, match
 
 ```odin
 import store "store"
-import memstore "store/memstore"
+import kvstore "store/kvstore"
 import "rdf:rdf"
 
-d: memstore.Dictionary
-memstore.dictionary_init(&d)
-defer memstore.dictionary_destroy(&d)
+s, open_err := kvstore.open("/var/lib/mystore")
+defer kvstore.close(s)
 
-ds: memstore.Dataset
-memstore.dataset_init(&ds)
-defer memstore.dataset_destroy(&ds)
-
-added, err := memstore.load_turtle(&d, &ds, source) // source: []byte
-// added == 3, err.message == ""
+added, parse_err, load_err := kvstore.load_turtle(s, source) // source: []byte
+// added == 3, parse_err.message == ""
 
 // find_term resolves a query's ground term without assigning an ID:
 // asking about a term the store has never seen leaves the dictionary
 // untouched and reports found=false, which callers short-circuit to
 // an empty result.
-knows, found := memstore.find_term(&d, rdf.IRI("http://example.org/knows"))
-
-it := memstore.match(&ds, store.Match_Pattern{store.WILDCARD, knows, store.WILDCARD, store.WILDCARD})
-defer memstore.match_destroy(&it)
-for {
-    q, ok := memstore.match_next(&it)
-    if !ok {
-        break
-    }
-    subject := memstore.lookup_term(&d, q[store.QUAD_S]).(rdf.IRI)
-    // ex:alice and ex:bob, in no guaranteed order
-}
-```
-
-The four loaders — `load_triples`, `load_turtle`, `load_quads`,
-`load_trig` — cover the parser's four formats. Each interns every
-statement's terms and inserts the encoded quad one statement at a time,
-so nothing borrowed from a parser statement outlives its loop iteration.
-Blank node labels are document-scoped: loading two documents that both
-say `_:b0` yields two distinct terms.
-
-### Export
-
-There is no export API in v1 — getting data back out is match + decode
-+ emit, through the parser's emitters:
-
-```odin
-it := memstore.match(&ds, store.MATCH_ALL)
-defer memstore.match_destroy(&it)
-for {
-    q, ok := memstore.match_next(&it)
-    if !ok {
-        break
-    }
-    quads_fmt.emit(w, memstore.decode_quad(&d, q)) // w: io.Writer
-}
-```
-
-### The same dataset, on disk
-
-`kvstore` is the identical procedure set with an `Error` return and a
-path:
-
-```odin
-import kvstore "store/kvstore"
-
-s, open_err := kvstore.open("/var/lib/mystore")
-defer kvstore.close(s)
-
-added, parse_err, load_err := kvstore.load_turtle(s, source)
-
 knows, found, find_err := kvstore.find_term(s, rdf.IRI("http://example.org/knows"))
+
 it, match_err := kvstore.match(s, store.Match_Pattern{store.WILDCARD, knows, store.WILDCARD, store.WILDCARD})
 defer kvstore.match_destroy(&it)
 for {
@@ -153,20 +105,47 @@ for {
     if !ok {
         break
     }
-    // A persistent lookup copies into the caller's allocator, so the
-    // term outlives the store and is the caller's to free.
+    // A lookup copies the term into the caller's allocator, so it
+    // outlives the store and is the caller's to free.
     subject, lookup_err := kvstore.lookup_term(s, q[store.QUAD_S])
     defer rdf.destroy(subject)
+    // ex:alice and ex:bob, in no guaranteed order
 }
 ```
 
-Quads and the dictionary survive process restarts with stable
-`Term_ID`s. `insert` commits its own write transaction; `match` opens a
-read transaction owned by the iterator and released by `match_destroy`,
-so matched quads are views of that MVCC snapshot. Each `load_*` wraps
-one document in one write transaction, making a persistent load atomic
-per document — a deliberate divergence from the in-memory loaders,
-which keep what they inserted before a syntax error.
+The store is a directory LMDB owns, and quads and the dictionary survive
+process restarts with stable `Term_ID`s. `insert` commits its own write
+transaction; `match` opens a read transaction owned by the iterator and
+released by `match_destroy`, so matched quads are views of that MVCC
+snapshot for as long as the iterator lives.
+
+The four loaders — `load_triples`, `load_turtle`, `load_quads`,
+`load_trig` — cover the parser's four formats. Each interns every
+statement's terms and inserts the encoded quad one statement at a time,
+so nothing borrowed from a parser statement outlives its loop iteration,
+and each wraps one document in one write transaction, so a load is
+atomic per document: a syntax error at the last statement leaves the
+store as it was. Blank node labels are document-scoped: loading two
+documents that both say `_:b0` yields two distinct terms.
+
+### Export
+
+There is no export API in v1 — getting data back out is match + decode
++ emit, through the parser's emitters:
+
+```odin
+it, match_err := kvstore.match(s, store.MATCH_ALL)
+defer kvstore.match_destroy(&it)
+for {
+    q, ok := kvstore.match_next(&it)
+    if !ok {
+        break
+    }
+    decoded, decode_err := kvstore.decode_quad(s, q, context.temp_allocator)
+    quads_fmt.emit(w, decoded) // w: io.Writer
+}
+free_all(context.temp_allocator)
+```
 
 ## Term IDs
 
@@ -214,8 +193,16 @@ blank-node identity, RDF-star triple terms. A backend adopts it by
 filling in a small adapter and declaring one test wrapper per check; the
 indirection stays in test code, so the public APIs remain
 convention-based. **Passing it verbatim is the definition of
-implementing the interface**, and both backends do, at both widths.
-`tests/readme` compiles the examples above.
+implementing the interface**, and `kvstore` does, at both widths. With
+one backend it is a regression suite rather than the portability proof
+it was while there were two; the adapter is kept unchanged so a second
+backend can restore that. `tests/readme` compiles the examples above.
+
+## Releases
+
+Version history and breaking changes are in [CHANGELOG.md](CHANGELOG.md). Note that
+**0.2.0 removed `store/memstore`**, the in-memory backend, with no deprecation path — see
+that entry before upgrading from 0.1.x.
 
 ## License
 

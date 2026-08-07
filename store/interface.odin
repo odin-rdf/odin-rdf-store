@@ -3,21 +3,23 @@ package store
 // Match interface contract (STORE-A-0002), v1.
 //
 // A dataset backend is a package implementing this procedure set over
-// its own dataset type — this repo ships two: store/memstore (the
-// in-memory reference) and store/kvstore (persistent, LMDB):
+// its own dataset type. This repo ships one — store/kvstore, over LMDB —
+// so what follows is both the convention and a description of it. The
+// convention is kept separate from the backend so a second one can be
+// added without renegotiating it (STORE-A-0002, STORE-A-0006):
 //
-//	dataset_init(ds, allocator)      prepare an empty dataset
-//	dataset_destroy(ds)              free everything the dataset owns
 //	insert(ds, quad) -> bool         add a quad; false if already present
 //	count(ds) -> int                 number of quads in the dataset
 //	match(ds, pattern) -> iterator   stream quads matching a pattern
 //	match_next(&it) -> (quad, ok)    yield the next match; ok=false when done
 //	match_destroy(&it)               release iterator resources
 //
-// Backends whose operations can fail against an environment (kvstore)
-// also return an Error from the fallible procedures; init/destroy may
-// take backend-specific parameters (a path, options). The names,
-// semantics, and iteration contract are what the convention fixes.
+// Opening and closing a dataset is deliberately not in the set: it is
+// where a backend's own nature shows, and kvstore's is open(path, opts)
+// / close over an LMDB environment. kvstore's operations can also fail
+// against that environment, so its fallible procedures return an Error.
+// What the convention fixes is the names, the semantics, and the
+// iteration contract — not the lifecycle.
 //
 // Every backend also implements the term dictionary its IDs come from —
 // the same convention, over whatever the backend calls its dictionary
@@ -35,13 +37,12 @@ package store
 // query's ground terms to IDs asks about terms the store may never have
 // seen, and getting an ID for one of them would be wrong twice over: it
 // pollutes the dictionary, and it makes reading a write. So find_term
-// assigns nothing and, in persistent backends, writes nothing — it
-// serves from a read transaction and works against a read-only
-// environment. An absent term reports found=false, which a caller
-// short-circuits to an empty result.
+// assigns nothing and writes nothing — it serves from a read
+// transaction and works against a read-only environment. An absent term
+// reports found=false, which a caller short-circuits to an empty result.
 //
 // Semantics every backend must satisfy (the conformance package is
-// the executable form of this contract; backends instantiate it as
+// the executable form of this contract; a backend instantiates it as
 // described there):
 //
 //   - Set semantics: a dataset holds a set of quads. Re-inserting an
@@ -54,9 +55,9 @@ package store
 //   - Streaming: match yields one encoded quad per match_next call and
 //     never materializes result sets. After the first ok=false, every
 //     further call returns ok=false. Callers must call match_destroy
-//     when done with an iterator (persistent backends hold cursors).
-//     An iterator is valid only until its dataset is mutated or
-//     destroyed.
+//     when done with an iterator — kvstore's holds an LMDB cursor and
+//     the read transaction it was opened in. An iterator is valid only
+//     until its dataset is mutated or destroyed.
 //   - Ordering: v1 guarantees nothing about the order matches are
 //     yielded in. Expected to be revised when the SPARQL planner
 //     arrives (STORE-A-0002 review triggers).
@@ -72,8 +73,12 @@ package store
 //     remove returns, the quad is absent from subsequent matches and
 //     counts — with no promise of physical erasure, so tombstone-based
 //     backends conform.
-//   - Allocators: dataset_init takes the allocator all dataset memory
-//     comes from (where meaningful for the backend).
+//   - Allocators: a backend's open procedure takes the allocator its
+//     handle and bookkeeping come from, and the procedures that hand a
+//     term back — lookup_term, lookup_graph_label, decode_quad — take
+//     the allocator that term is built in and leave it to the caller to
+//     free. kvstore's quads and dictionary entries themselves live in
+//     mapped pages rather than in any allocator.
 
 // Match_Pattern is a quad pattern: per position, a bound Term_ID or
 // WILDCARD. Position indices are QUAD_S/P/O/G, as for Encoded_Quad.

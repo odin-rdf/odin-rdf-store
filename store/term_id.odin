@@ -1,19 +1,22 @@
 // Package store is the shared vocabulary of the odin-rdf-store family:
 // the Term_ID encoding, the encoded-quad and match-pattern types, and
-// the match interface contract (interface.odin) that every backend
-// implements. It contains no storage itself — the backends live in the
-// subdirectory packages, as peers of one interface:
+// the match interface contract (interface.odin) that a backend
+// implements. It contains no storage itself — the storage lives in a
+// subdirectory package:
 //
-//   - store/memstore — the in-memory reference backend: dictionary,
-//     permutation-indexed dataset, bulk loaders. No dependencies.
-//   - store/kvstore  — the persistent backend over LMDB: the same
-//     procedure set and semantics, durable on disk (ADR STORE-A-0003).
+//   - store/kvstore — the backend over LMDB: dictionary, three
+//     permutation indexes, bulk loaders, durable on disk (ADR
+//     STORE-A-0003).
 //
-// The conformance package is the executable form of the contract; both
-// backends instantiate it, and a new backend proves itself by doing
-// the same. Downstream engines (odin-rdf-sparql, odin-rdf-shacl)
-// import this package for the vocabulary plus whichever backend the
-// caller picks.
+// It is the only one. An in-memory reference backend came first and was
+// retired on 2026-08-07 (STORE-A-0006), which makes the contract above
+// LMDB's semantics by definition; the split between this vocabulary
+// package and the backend is kept so a second backend can be added on
+// evidence rather than by archaeology. The conformance package is the
+// executable form of the contract; kvstore instantiates it, and a new
+// backend would prove itself by doing the same. Downstream engines
+// (odin-rdf-sparql, odin-rdf-shacl) import this package for the
+// vocabulary and kvstore for the storage.
 //
 // Term_ID encoding (ADR STORE-A-0001): a Term_ID is a fixed-width
 // unsigned integer whose top TAG_BITS bits carry the term kind and
@@ -25,8 +28,9 @@
 //	odin build . -define:RDF_STORE_TERM_ID_BITS=32
 //
 // selects a 32-bit ID space (16-byte encoded quads, ~2^29 terms per
-// kind); the default is 64. Persistent backends must record the width
-// they were written with and refuse to open under the other width.
+// kind); the default is 64. A backend that persists must record the
+// width it was written with and refuse to open under the other width,
+// as kvstore's meta does.
 package store
 
 // TERM_ID_BITS is the build-time Term_ID width in bits: 32 or 64.

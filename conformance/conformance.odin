@@ -6,10 +6,15 @@
 //
 // A backend adopts the suite by filling a Backend adapter — procedure
 // pointers over an opaque context — and declaring one thin @(test)
-// wrapper per check_* procedure, each on a fresh backend instance
-// (see inmem_test.odin for the in-memory instantiation). The
-// indirection is confined to test code; the public backend APIs stay
-// convention-based per STORE-A-0002.
+// wrapper per check_* procedure, each on a fresh backend instance (see
+// store/kvstore/conformance_test.odin for the only instantiation there
+// is). The indirection is confined to test code; the public backend
+// APIs stay convention-based per STORE-A-0002.
+//
+// With one backend the suite is a regression suite rather than the
+// portability proof it was while memstore existed (STORE-A-0006). The
+// adapter is retained unchanged for exactly that reason: it is what a
+// second backend would fill.
 package conformance
 
 import "core:testing"

@@ -131,3 +131,11 @@ its whole life.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-07 — Created from a consumer design review.** The first application-shaped consumer of the family (`odin-rdf-app`) found that writing a handful of quads atomically required serializing them to Turtle so the store would parse them back. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — memstore retired (STORE-A-0006, STORE-I-0003), which simplifies this item
+  rather than shrinking it.** Two acceptance criteria assumed two implementations: "Both
+  backends implement it. memstore has no transactions, so there it is a loop" — the loop
+  case is gone, and with one backend `insert_all` is one LMDB write transaction, full stop.
+  That was the whole of the tension this item recorded between its own atomicity and
+  STORE-T-0022's, so the "if T-0022 lands first" note in the Effort Estimate becomes a
+  sequencing convenience rather than a design question. The blank-node scoping criterion is
+  untouched and is now the item's only open contract decision.
