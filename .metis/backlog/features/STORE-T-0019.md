@@ -115,3 +115,19 @@ to pass — which is a decision to make deliberately, not one to back into.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-05 — Created from odin-rdf-sparql SPARQL-T-0019**, the evaluation initiative's evidence consolidation. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — Designed jointly with STORE-T-0022 as STORE-A-0005** (since archived
+  undecided; see the following update). The
+  hypothesis holds: one `Txn` handle with a `.Read`/`.Write` mode, of which a read-only
+  transaction is the snapshot this item asks for. No separate snapshot concept enters the
+  interface. memstore's answer is the declared one this item allowed for — a generation
+  counter that fails loudly (`SNAPSHOT_ISOLATION :: false`), with retained-index
+  copy-on-write designed and costed as the upgrade path — while its *write* half is a
+  full guarantee, the asymmetry both items predicted. Recommended for promotion to an
+  initiative together with STORE-T-0022 rather than worked as a standalone item.
+- **2026-08-07 — Blocked behind STORE-I-0003 (retire memstore); STORE-A-0005 archived
+  undecided.** memstore is being removed, which does not simplify this item's hard
+  question — it deletes it. What remains is LMDB's read transaction, which *is* the
+  snapshot this item asks for: no declared capability, no conditional conformance tier,
+  no copy-on-write question. The finding that survives and should drive the rewrite is
+  the one that matters here — **a snapshot is a read-only transaction, not a separate
+  concept.** Re-open jointly with STORE-T-0022 once the removal lands.

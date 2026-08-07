@@ -156,3 +156,23 @@ not part of it and should not be designed here.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-07 — Created from a consumer design review.** The first application-shaped consumer of the family (`odin-rdf-app`) worked through a create-resource request end to end and found validate-before-commit inexpressible. Awaiting pickup in an odin-rdf-store session.
+- **2026-08-07 — Designed jointly with STORE-T-0019 as STORE-A-0005** (since archived
+  undecided; see the following update). One handle,
+  two modes; the "designed jointly, outcome recorded" criterion is discharged there. The
+  guarantee split is a universal core (atomicity, read-your-own-writes, provisional IDs,
+  single writer, iterator invalidation) plus one declared capability
+  (`SNAPSHOT_ISOLATION`), so the conformance suite branches instead of forcing memstore
+  into copy-on-write — and asserts both branches positively rather than skipping one.
+  memstore's write half is a journal and a full guarantee; its read half detects rather
+  than isolates. Recommended for promotion to an initiative together with STORE-T-0019.
+- **2026-08-07 — Blocked behind STORE-I-0003 (retire memstore); STORE-A-0005 archived
+  undecided.** With memstore gone, this item's P0 capability is very nearly publication
+  work: LMDB already gives atomicity and read-your-own-writes, `insert_txn` and the
+  `_txn` read siblings already exist behind `@(private)`, and the guarantee split that
+  dominated the archived ADR disappears. The design that survives — one handle with a
+  `.Read`/`.Write` mode, the `_txn` procedure set with autocommit defined beneath it,
+  provisional Term_IDs, iterator invalidation on write, and `match` as the one read path
+  needing real design because its iterator owns its transaction — carries into the
+  rewrite. The **validate-before-commit** evidence that motivated this item is unaffected
+  by the removal and remains the reason it is P0. Re-open jointly with STORE-T-0019 once
+  the removal lands.
