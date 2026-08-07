@@ -18,7 +18,6 @@ COLL := -collection:rdf=../odin-rdf-parser
 # a package with no tests prints a header and no result, which reads like a
 # hang. It is vetted below instead (STORE-T-0028).
 PKGS := store \
-				store/memstore \
 				store/kvstore \
 				tests/readme
 

@@ -8,8 +8,8 @@ package readme
 import "core:fmt"
 import "core:io"
 import "core:os"
-import "core:slice"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 
 import "rdf:rdf"
@@ -17,7 +17,6 @@ import quads_fmt "rdf:rdf/quads"
 
 import store "../../store"
 import kvstore "../../store/kvstore"
-import memstore "../../store/memstore"
 
 @(private = "file")
 EX :: "http://example.org/"
@@ -31,78 +30,37 @@ ex:alice ex:knows ex:bob ;
 ex:bob ex:knows ex:carol .
 `
 
-// The in-memory quick start: load a document, then ask who knows whom.
-@(test)
-readme_load_and_match :: proc(t: ^testing.T) {
-	d: memstore.Dictionary
-	memstore.dictionary_init(&d)
-	defer memstore.dictionary_destroy(&d)
-
-	ds: memstore.Dataset
-	memstore.dataset_init(&ds)
-	defer memstore.dataset_destroy(&ds)
-
-	added, err := memstore.load_turtle(&d, &ds, transmute([]byte)string(README_SOURCE))
-	testing.expect_value(t, err.message, "")
-	testing.expect_value(t, added, 3)
-	testing.expect_value(t, memstore.count(&ds), 3)
-
-	// find_term resolves a query's ground term without assigning an ID:
-	// asking about a term the store has never seen leaves the dictionary
-	// untouched and reports found=false, which callers short-circuit to
-	// an empty result.
-	knows, found := memstore.find_term(&d, rdf.IRI(EX + "knows"))
-	testing.expect(t, found)
-
-	subjects: [dynamic]string
-	defer delete(subjects)
-
-	it := memstore.match(&ds, store.Match_Pattern{store.WILDCARD, knows, store.WILDCARD, store.WILDCARD})
-	defer memstore.match_destroy(&it)
-	for {
-		q, ok := memstore.match_next(&it)
-		if !ok {
-			break
-		}
-		subject := memstore.lookup_term(&d, q[store.QUAD_S]).(rdf.IRI)
-		append(&subjects, string(subject))
-	}
-
-	// v1 promises nothing about match order, so a caller that cares
-	// sorts (STORE-A-0002).
-	slice.sort(subjects[:])
-	testing.expect_value(t, len(subjects), 2)
-	testing.expect_value(t, subjects[0], EX + "alice")
-	testing.expect_value(t, subjects[1], EX + "bob")
-}
-
 // Export is match + decode + emit: there is no export API in v1.
 @(test)
 readme_export_example :: proc(t: ^testing.T) {
-	d: memstore.Dictionary
-	memstore.dictionary_init(&d)
-	defer memstore.dictionary_destroy(&d)
+	path := readme_db_path()
+	defer remove_readme_db(path)
 
-	ds: memstore.Dataset
-	memstore.dataset_init(&ds)
-	defer memstore.dataset_destroy(&ds)
+	s, open_err := kvstore.open(path)
+	testing.expect(t, open_err == nil)
+	defer kvstore.close(s)
 
-	_, load_err := memstore.load_turtle(&d, &ds, transmute([]byte)string(README_SOURCE))
+	_, load_err, db_err := kvstore.load_turtle(s, transmute([]byte)string(README_SOURCE))
 	testing.expect_value(t, load_err.message, "")
+	testing.expect(t, db_err == nil)
 
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
 	w := strings.to_writer(&b)
 
-	it := memstore.match(&ds, store.MATCH_ALL)
-	defer memstore.match_destroy(&it)
+	it, match_err := kvstore.match(s, store.MATCH_ALL)
+	testing.expect(t, match_err == nil)
+	defer kvstore.match_destroy(&it)
 	for {
-		q, ok := memstore.match_next(&it)
+		q, ok := kvstore.match_next(&it)
 		if !ok {
 			break
 		}
-		testing.expect_value(t, quads_fmt.emit(w, memstore.decode_quad(&d, q)), io.Error.None)
+		decoded, decode_err := kvstore.decode_quad(s, q, context.temp_allocator)
+		testing.expect(t, decode_err == nil)
+		testing.expect_value(t, quads_fmt.emit(w, decoded), io.Error.None)
 	}
+	free_all(context.temp_allocator)
 
 	// One N-Quads line per stored quad.
 	testing.expect_value(t, strings.count(strings.to_string(b), "\n"), 3)
@@ -154,6 +112,12 @@ readme_persistent_example :: proc(t: ^testing.T) {
 // a trailing slash and Linux usually exports nothing, so concatenating onto
 // the variable yields a path at the filesystem root on Linux. Windows names
 // the variable TEMP or TMP.
+// A pid alone stopped being unique when the in-memory example became a
+// second persistent one (STORE-T-0030): two tests on ten threads, one path,
+// and the second open fails on a directory that already exists.
+@(private = "file")
+readme_db_counter: u64
+
 @(private = "file")
 readme_db_path :: proc() -> string {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
@@ -167,7 +131,8 @@ readme_db_path :: proc() -> string {
 		tmp = "/tmp"
 	}
 	tmp = strings.trim_right(tmp, `/\`)
-	return fmt.aprintf("%s/odin-rdf-store-readme-%d", tmp, os.get_pid())
+	n := sync.atomic_add(&readme_db_counter, 1)
+	return fmt.aprintf("%s/odin-rdf-store-readme-%d-%d", tmp, os.get_pid(), n)
 }
 
 @(private = "file")

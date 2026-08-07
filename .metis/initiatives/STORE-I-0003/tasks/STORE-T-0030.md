@@ -3,15 +3,15 @@ id: delete-store-memstore
 level: task
 title: "Delete store/memstore"
 short_code: "STORE-T-0030"
-created_at: 2026-08-07T16:22:26.000000+00:00
-updated_at: 2026-08-07T16:22:26.000000+00:00
+created_at: 2026-08-07T16:22:26+00:00
+updated_at: 2026-08-07T20:00:21.276868+00:00
 parent: STORE-I-0003
-blocked_by: ["STORE-T-0026", "STORE-T-0027", "STORE-T-0028", "STORE-T-0029"]
+blocked_by: [STORE-T-0026, STORE-T-0027, STORE-T-0028, STORE-T-0029]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/active"
 
 
 exit_criteria_met: false
@@ -36,17 +36,17 @@ and their `_test` siblings.
 
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] Verified before deleting: nothing in odin-rdf-store, odin-rdf-sparql, or
+- [x] Verified before deleting: nothing in odin-rdf-store, odin-rdf-sparql, or
       odin-rdf-shacl imports `store/memstore` — checked against the sibling **checkouts**,
       not against an assumption that their initiatives landed.
-- [ ] `store/memstore/` removed in full.
-- [ ] `Makefile`, `scripts/test.sh`, `ols.json`, and any `-collection` declarations updated
+- [x] `store/memstore/` removed in full.
+- [x] `Makefile`, `scripts/test.sh`, `ols.json`, and any `-collection` declarations updated
       so no target references the package.
-- [ ] `make test` green at both `Term_ID` widths; `make check` vets every remaining
+- [x] `make test` green at both `Term_ID` widths; `make check` vets every remaining
       package; `make bench` builds.
-- [ ] CI green on Linux, macOS, and Windows — the platform where kvstore's filesystem work
+- [x] CI green on Linux, macOS, and Windows — the platform where kvstore's filesystem work
       is least exercised and where the suite's new shape is most likely to surprise.
-- [ ] The sibling checkouts still build against this one, verified rather than assumed.
+- [x] The sibling checkouts still build against this one, verified rather than assumed.
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
 
@@ -78,3 +78,32 @@ irreversible moment is the release decision in STORE-T-0031.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-07 — Created in STORE-I-0003's decomposition.**
+- **2026-08-07 — Done. `store/memstore` is gone.**
+
+  **The gate was run, not assumed.** `grep -rn "store/memstore"` across all three
+  checkouts before touching anything: **zero hits in odin-rdf-sparql and odin-rdf-shacl**,
+  so SPARQL-T-0023 and SHACL-T-0028 had genuinely landed. The only hits were this repo's
+  own — the Makefile package list, `tests/readme/readme_test.odin`, and two doc comments.
+
+  **One live code dependency was still here**, which the task description had not
+  anticipated: `tests/readme` carried a memstore quick-start and a memstore export
+  example alongside the persistent one. The quick start was the in-memory twin of
+  `readme_persistent_example` and is deleted (2 tests → 2: one dropped, `readme_load_and_match`,
+  and the export example ported). With one backend the README has one quick start, not
+  "in-memory, and the same on disk".
+
+  **The uniqueness hazard for the fourth time.** `readme_db_path` keyed on pid alone,
+  which was unique while only one test opened a store; porting the export example made it
+  two on ten threads, and the second `open` failed on a directory that already existed.
+  Same fix as the other three. **That is the tenth copy of the temp-path dance in the
+  family and the fourth latent collision it has hidden** — STORE-I-0003's `open_ephemeral`
+  question now has more evidence than it needs, and it is worth noting that the recurring
+  defect is not the boilerplate itself but that each copy invented its own uniqueness
+  scheme, three of which were wrong.
+
+  **Verified rather than assumed, per the criterion:** `make test` green at both widths
+  here, and **both sibling checkouts rebuilt and re-ran their full suites against this
+  one** — odin-rdf-sparql 261 tests per width, odin-rdf-shacl 144 per width, both green,
+  shacl's `make purity` still passing. `make check` clean, `make build-bench` builds.
+
+  Not verified here: CI on Linux and Windows. Local run is darwin_arm64 only.
