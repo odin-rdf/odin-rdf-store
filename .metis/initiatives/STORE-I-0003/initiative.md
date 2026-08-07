@@ -4,17 +4,17 @@ level: initiative
 title: "Retire memstore: one backend, one contract"
 short_code: "STORE-I-0003"
 created_at: 2026-08-07T15:52:00+00:00
-updated_at: 2026-08-07T16:31:07.324506+00:00
+updated_at: 2026-08-07T21:38:22.105869+00:00
 parent: STORE-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
-exit_criteria_met: false
+exit_criteria_met: true
 estimated_complexity: M
 initiative_id: retire-memstore-one-backend-one
 ---
@@ -427,29 +427,7 @@ the duplication they actually produce, and sequenced wherever it is convenient.
 
   Awaiting review before activation.
 
-## Exit Criteria **[REQUIRED]**
-
-- [ ] An ADR records the single-backend stance and settles what it does to STORE-A-0002,
-      to the vision's "multiple backends of one interface" claim and in-memory-backend
-      success criterion, and to STORE-I-0001's reference-implementation framing.
-- [ ] `store/memstore` is gone, and nothing in odin-rdf-store, odin-rdf-sparql, or
-      odin-rdf-shacl imports it.
-- [ ] Test counts per repo are equal to or greater than before the port, at both
-      `Term_ID` widths, on all three CI platforms — recorded before and after, with any
-      reduction named and justified.
-- [ ] The shapes-from-a-Turtle-file path survives on `shacl/kvstore` over a
-      caller-supplied store, with the compile-once contract and its blank-node reason in
-      the doc comment — or its removal is a recorded decision with the reason.
-- [ ] odin-rdf-shacl's `purity` target is retargeted, retired, or deleted — decided, not
-      left broken, with SHACL-A-0001 amended if its justification changed.
-- [ ] Documentation across all three repos and the shared `CLAUDE.md` describes one
-      backend.
-- [ ] A replacement transaction ADR is written against a single-backend contract, carrying
-      forward the archived STORE-A-0005's surviving findings, and the transaction work can
-      be decomposed without a capability device.
-- [ ] Exactly one of the two outstanding edits to STORE-A-0002 has been applied — this
-      initiative's demonstration-claim change — and the archived ADR's capability-tier
-      amendment has not.- **2026-08-07 — All eight tasks completed; the initiative stays active. Two exit criteria
+- **2026-08-07 — All eight tasks completed; the initiative stays active. Two exit criteria
   are open, and neither can be closed by writing a document.**
 
   STORE-T-0031 and STORE-T-0032 completed, which finishes the decomposition: T-0025 (ADR +
@@ -508,3 +486,71 @@ the duplication they actually produce, and sequenced wherever it is convenient.
   Criterion 3 is met **for odin-rdf-store only**. It reads "per repo", and odin-rdf-sparql
   (3 commits) and odin-rdf-shacl (5 commits) are still unpushed, so their ports remain
   verified on local darwin_arm64 alone. Criterion 6 is unchanged and still deferred.
+
+
+- **2026-08-07 — Closed. All eight exit criteria met, one of them on a deliberate call
+  rather than a completed run.**
+
+  **Criterion 3, stated precisely so the record is not stronger than the evidence.**
+  odin-rdf-store is green on all three platforms (run `31217331487`, and again at `720b30a`).
+  odin-rdf-shacl is green on all three (run `31218439354`): 144 tests per width, Windows 211s.
+  odin-rdf-sparql is green on ubuntu and macos at 261 tests per width, and its **Windows job
+  was closed out at roughly 98% complete with zero failures rather than at completion** —
+  Greger's call, taken because a build error at that point is unlikely and cheaper to handle
+  after the fact than to hold an initiative open for. If it does fail, this criterion reopens;
+  it is not being recorded as something it is not.
+
+  Worth noting the Windows job's slowness is now understood rather than tolerated: every
+  `kvstore.open` materializes a full 1 GiB file on that platform, because LMDB has no
+  sparse-file handling there and `mdb_env_map` calls `SetEndOfFile` at the map size. That is
+  filed as **STORE-T-0033** with the measurements, and the misleading `Options.map_size` doc
+  comment is corrected.
+
+  **Criterion 6** closed with the two sibling README summary lines, deferred earlier until
+  after v0.2.0 and taken once it shipped. A grep across all three READMEs now finds no
+  two-backend claim except odin-rdf-store's CHANGELOG entry, which is deliberately historical.
+
+  **The release.** odin-rdf-store **v0.2.0** is tagged at `282b18e` — the commit CI verified —
+  and pushed, with a new `CHANGELOG.md` leading on the removal as breaking with no deprecation
+  path. odin-rdf-shacl's CI pin moved v0.1.1 → v0.2.0; odin-rdf-sparql, which had been tracking
+  upstream default branches rather than pinning at all, now pins the parser and store to
+  released tags like its sibling.
+
+  **What deliberately leaves this initiative alive elsewhere.** `kvstore.open_ephemeral` was
+  scoped here and deferred on purpose, to be decided on evidence the ports would produce. That
+  evidence arrived — 2 copies of the temp-path dance at scoping became 12, both siblings
+  reported it upstream unprompted, four collisions have been traced to it, and Windows CI
+  supplied a third argument nobody anticipated. It is filed as **STORE-T-0033** rather than
+  archived with this document, which would have buried the question together with its own
+  evidence.
+
+  **What comes next**, unblocked by this initiative rather than part of it: STORE-T-0019 and
+  STORE-T-0022 now have a decided model in STORE-A-0007 and can be decomposed as the
+  transaction initiative. Both STORE-A-0006 and STORE-A-0007 are still `#phase/draft` and want
+  a decision.
+
+
+## Exit Criteria **[REQUIRED]**
+
+- [x] An ADR records the single-backend stance and settles what it does to STORE-A-0002,
+      to the vision's "multiple backends of one interface" claim and in-memory-backend
+      success criterion, and to STORE-I-0001's reference-implementation framing.
+- [x] `store/memstore` is gone, and nothing in odin-rdf-store, odin-rdf-sparql, or
+      odin-rdf-shacl imports it.
+- [x] Test counts per repo are equal to or greater than before the port, at both
+      `Term_ID` widths, on all three CI platforms — recorded before and after, with any
+      reduction named and justified. *(sparql's Windows job closed at ~98% with zero fails,
+      not at completion — see the closing status update.)*
+- [x] The shapes-from-a-Turtle-file path survives on `shacl/kvstore` over a
+      caller-supplied store, with the compile-once contract and its blank-node reason in
+      the doc comment — or its removal is a recorded decision with the reason.
+- [x] odin-rdf-shacl's `purity` target is retargeted, retired, or deleted — decided, not
+      left broken, with SHACL-A-0001 amended if its justification changed.
+- [x] Documentation across all three repos and the shared `CLAUDE.md` describes one
+      backend.
+- [x] A replacement transaction ADR is written against a single-backend contract, carrying
+      forward the archived STORE-A-0005's surviving findings, and the transaction work can
+      be decomposed without a capability device.
+- [x] Exactly one of the two outstanding edits to STORE-A-0002 has been applied — this
+      initiative's demonstration-claim change — and the archived ADR's capability-tier
+      amendment has not.
