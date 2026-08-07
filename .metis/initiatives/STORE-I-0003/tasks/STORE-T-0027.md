@@ -3,15 +3,15 @@ id: proposal-to-odin-rdf-shacl-retire
 level: task
 title: "Proposal to odin-rdf-shacl: retire the memstore instantiation, rehome compile_turtle, settle purity"
 short_code: "STORE-T-0027"
-created_at: 2026-08-07T16:22:23.000000+00:00
-updated_at: 2026-08-07T16:22:23.000000+00:00
+created_at: 2026-08-07T16:22:23+00:00
+updated_at: 2026-08-07T16:43:04.430237+00:00
 parent: STORE-I-0003
-blocked_by: ["STORE-T-0025"]
+blocked_by: [STORE-T-0025]
 archived: false
 
 tags:
   - "#task"
-  - "#phase/todo"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -34,19 +34,23 @@ This is the larger of the two proposals and the only one carrying decisions beyo
 mechanical port. odin-rdf-shacl is where every non-test dependant of memstore in the family
 lives.
 
+## Acceptance Criteria
+
+## Acceptance Criteria
+
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] An initiative exists in odin-rdf-shacl's `.metis` carrying the decided ADR from
+- [x] An initiative exists in odin-rdf-shacl's `.metis` carrying the decided ADR from
       STORE-T-0025, the footprint (**528 lines of code, 3,540 lines of tests**), and the
       sequencing constraint against STORE-T-0030.
-- [ ] **`compile_turtle` is re-signed to take the caller's store**, per STORE-I-0003
+- [x] **`compile_turtle` is re-signed to take the caller's store**, per STORE-I-0003
       Detailed Design point 2:
       `compile_turtle(s, st: ^kvstore.Store, source, graph: rdf.Graph_Label = nil, base, allocator)`.
       The proposal must carry *why*: today's version silently owns a database, which was
       tolerable when the database was a hash map; and its own doc comment's stated reason
       for living in an instantiation package ("keeps LMDB out of the link of every consumer
       that only wants an in-memory store") dies with memstore.
-- [ ] **The compile-once contract and its reason are in the proposal**, because the
+- [x] **The compile-once contract and its reason are in the proposal**, because the
       failure is silent. `load_turtle` applies per-load blank-node scoping
       (`fresh_blank_txn`), and shapes graphs are blank-node dense, so reloading the same
       shapes into the same named graph does **not** dedupe — repeated loads accumulate a
@@ -54,13 +58,13 @@ lives.
       shapes. Contract: load at startup, keep the `Shapes` value (it outlives the store by
       design, SHACL-A-0001), never recompile per request. Relaxes when STORE-T-0023
       (`remove`) lands.
-- [ ] **The `purity` target's fate is decided**, not left broken. Three options, theirs to
+- [x] **The `purity` target's fate is decided**, not left broken. Three options, theirs to
       pick: delete it; retarget it at the `shacl` core package alone (still catches a stray
       `kvstore` import, still meaningful as internal hygiene, but no longer protects a
       consumer); or retire it with an amendment. Recommend the second **plus** amending
       SHACL-A-0001 decision 1, whose recorded justification is exactly the property that
       evaporates.
-- [ ] **The benchmark port is scoped honestly as a changed measurement, not a port.**
+- [x] **The benchmark port is scoped honestly as a changed measurement, not a port.**
       `bench/consumers.odin` uses memstore *deliberately* — its own comment: "memstore only,
       deliberately. The question is what *this engine* allocates, and on kvstore every
       figure would carry LMDB's page handling and term [decoding]." That reason is real:
@@ -70,10 +74,10 @@ lives.
       and say so** — arguably the more honest number, since every real consumer pays it.
       The historical figures are not comparable and must be marked as such rather than left
       looking like a regression.
-- [ ] Recorded as lost, not silently dropped: `bench/main.odin`'s cross-backend
+- [x] Recorded as lost, not silently dropped: `bench/main.odin`'s cross-backend
       comparisons — the timing comparison between the two instantiations, and the invariant
       it asserts that "the read count is identical on memstore and kvstore."
-- [ ] Test-count parity before and after at both widths is an exit criterion of their
+- [x] Test-count parity before and after at both widths is an exit criterion of their
       initiative. Note that shacl's kvstore-side count goes from **14 to ~85**, so this
       port is also a coverage expansion on a path that has been much thinner.
 
@@ -107,3 +111,14 @@ store, which is the right boundary but a real ergonomic change.
 ## Status Updates **[REQUIRED]**
 
 - **2026-08-07 — Created in STORE-I-0003's decomposition.**
+- **2026-08-07 — Filed as odin-rdf-shacl SHACL-T-0028** (`#phase/backlog`), committed there
+  as `c564303`. Same rationale for backlog-item-not-initiative as STORE-T-0026.
+  All three decisions carried with their reasoning rather than as instructions: the
+  `compile_turtle` re-signature (with the recommended signature spelled out and the
+  ergonomic cost named as legitimate grounds for pushback), the compile-once contract with
+  its blank-node reason, the `purity` retarget plus the SHACL-A-0001 decision-1 amendment,
+  and the benchmark port with its changed question. Added beyond the original criteria: the
+  **vision retraction** for their falsified success criterion, a suggested ordering (tests
+  first, then the three decisions, which benefit from a green suite), and a request to report
+  back if the port produces further copies of the temp-path boilerplate — the evidence
+  `open_ephemeral` is waiting on.

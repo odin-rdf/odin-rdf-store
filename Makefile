@@ -9,15 +9,21 @@ OUT   := build/$(NAME)
 # so the language server resolves what the compiler does.
 COLL := -collection:rdf=../odin-rdf-parser
 
-# Every package with tests. The two backends are peers of one interface and
-# each carries its own suite; conformance is the executable form of the
-# contract, instantiated once per backend; tests/readme compiles the README's
-# examples so the documentation cannot drift from the API.
+# Every package with tests. tests/readme compiles the README's examples so the
+# documentation cannot drift from the API.
+#
+# `conformance` is not here: it is the executable form of the contract, but it
+# carries no tests of its own -- a backend instantiates it, and the suite runs
+# inside that backend's package (store/kvstore/conformance_test.odin). Listing
+# a package with no tests prints a header and no result, which reads like a
+# hang. It is vetted below instead (STORE-T-0028).
 PKGS := store \
 				store/memstore \
 				store/kvstore \
-				conformance \
 				tests/readme
+
+# Packages to vet but not test: `conformance` is a library its consumers test.
+CHECK_ONLY := conformance
 
 # STORE-A-0001 guardrail: the Term_ID width is a build-time choice and both
 # configurations stay green, so the suite runs twice rather than once. This is
@@ -51,7 +57,7 @@ test: ## Run the full suite at both Term_ID widths
 # Vets every package including the ones with no tests -- vendor/lmdb is a
 # binding nothing else checks, and bench is a main package the suite skips.
 check: ## Vet every package at the default Term_ID width
-	@for pkg in $(PKGS) vendor/lmdb; do \
+	@for pkg in $(PKGS) $(CHECK_ONLY) vendor/lmdb; do \
 		echo "-- $$pkg --"; \
 		odin check $$pkg -no-entry-point -vet -strict-style $(COLL) || exit 1; \
 	done
