@@ -7,7 +7,7 @@ changes land.
 The `.metis/` directory holds the reasoning behind everything here — the vision, the
 initiatives, and the ADRs each entry cites.
 
-## Unreleased
+## 0.3.1 — 2026-08-08
 
 ### Changed
 
