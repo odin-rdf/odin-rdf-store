@@ -4,14 +4,14 @@ level: initiative
 title: "Transactions and snapshots: publish the handle"
 short_code: "STORE-I-0004"
 created_at: 2026-08-07T22:12:31.838098+00:00
-updated_at: 2026-08-07T22:29:18.597489+00:00
+updated_at: 2026-08-08T00:02:18.241041+00:00
 parent: STORE-V-0001
 blocked_by: []
 archived: false
 
 tags:
   - "#initiative"
-  - "#phase/active"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -321,41 +321,41 @@ Steps 3 and 4 are parallel after 1; 2 is parallel with both.
 Absorbed from STORE-T-0019's and STORE-T-0022's acceptance criteria, with the two memstore
 criteria dropped as dead and STORE-A-0007's own additions folded in.
 
-- [ ] **A transaction handle in the backend convention**: begin one from a dataset, insert
+- [x] **A transaction handle in the backend convention**: begin one from a dataset, insert
       through it, read through it (`match`, `count`, `find_term`, `lookup_term`, `intern_term`,
       the graph-label trio, the quad codec — and whatever STORE-T-0016 eventually adds), then
       commit or abort. Opaque, named by the convention, never `^lmdb.Txn`.
-- [ ] **A read transaction is the snapshot**, with no separate snapshot type and no snapshot
+- [x] **A read transaction is the snapshot**, with no separate snapshot type and no snapshot
       vocabulary anywhere in the interface. Reads through one transaction see one dataset.
-- [ ] **Read-your-own-writes**: a read issued through an open write transaction observes that
+- [x] **Read-your-own-writes**: a read issued through an open write transaction observes that
       transaction's own uncommitted writes.
-- [ ] **Atomicity over quads**: after commit every quad the transaction wrote is visible; after
+- [x] **Atomicity over quads**: after commit every quad the transaction wrote is visible; after
       abort none is; no intermediate state is observable from outside. Atomicity over the
       *dictionary* is explicitly not claimed, and no assertion covers it.
-- [ ] **Snapshot isolation**: a read transaction is unchanged across a concurrent commit, and a
+- [x] **Snapshot isolation**: a read transaction is unchanged across a concurrent commit, and a
       reader outside an open write transaction sees the pre-commit dataset.
-- [ ] **Provisional `Term_ID`s**: IDs assigned by interning inside a transaction are valid only
+- [x] **Provisional `Term_ID`s**: IDs assigned by interning inside a transaction are valid only
       if it commits, documented as the consumer's to discard on abort.
-- [ ] **Single writer, no nesting**: a second write transaction on one handle is **refused with
+- [x] **Single writer, no nesting**: a second write transaction on one handle is **refused with
       an error rather than left to deadlock**, and transactions do not nest.
-- [ ] **The iterator interaction is specified rather than left to fall out** — an iterator is
+- [x] **The iterator interaction is specified rather than left to fall out** — an iterator is
       valid until `match_destroy`, a write through its own transaction, or that transaction's
       commit/abort, whichever is first. `match_txn`'s iterator borrows; bare `match`'s still
       owns.
-- [ ] **`Store.next` is snapshotted at begin and restored on abort**, so the in-memory counter
+- [x] **`Store.next` is snapshotted at begin and restored on abort**, so the in-memory counter
       mirror cannot drift from the persisted one, with a test.
-- [ ] **`store/interface.odin` states the read and write models**, including what a consumer
+- [x] **`store/interface.odin` states the read and write models**, including what a consumer
       that never opens a transaction may assume — and today's per-operation `match`, `insert`
       and lookups **remain valid, unchanged in name, signature and semantics**, now *defined*
       as one-operation transactions rather than merely implemented that way.
-- [ ] **The two costs are stated as contract**: an open read transaction pins pages and makes a
+- [x] **The two costs are stated as contract**: an open read transaction pins pages and makes a
       concurrent writer grow the file; an open write transaction holds the environment's writer
       lock, and the validate-before-commit pattern holds one across an entire validation by
       construction.
-- [ ] **Conformance suite, one uniform body, both `Term_ID` widths**: the seven checks of
+- [x] **Conformance suite, one uniform body, both `Term_ID` widths**: the seven checks of
       STORE-A-0007 point 5, with the `Backend` adapter grown by transactional procedure
       pointers and by nothing else — no capability field, no tier, no skip.
-- [ ] **Validate-before-commit is demonstrably expressible** — a test that builds a candidate
+- [x] **Validate-before-commit is demonstrably expressible** — a test that builds a candidate
       inside a write transaction, reads the dataset it would produce through that same
       transaction, and commits or aborts on the answer. This is the P0 gap; it closes with a
       demonstration or it does not close.
@@ -363,7 +363,9 @@ criteria dropped as dead and STORE-A-0007's own additions folded in.
       decomposition rather than before, with the supersession recorded in each — including
       where every acceptance criterion went and which two died with memstore rather than
       moving. *(Met 2026-08-07, at decomposition.)*
-- [ ] CI green on Linux, macOS and Windows at both widths, and a release decision taken.
+- [x] CI green on Linux, macOS and Windows at both widths, and a release decision taken.
+      *(Run `31228658565` at `66cf6f4`: ubuntu, windows and macos all green, vet plus tests at
+      both widths. Released as **v0.3.0**, tagged at that commit.)*
 
 ## Status Updates
 
@@ -478,3 +480,42 @@ criteria dropped as dead and STORE-A-0007's own additions folded in.
   self-deadlocked on LMDB's writer lock, which is the precise outcome the refusal exists to
   prevent. Routing every write path through one claim closed it, and forced the better design
   of the counter snapshot as a side effect.
+
+- **2026-08-08 — Closed. All fifteen exit criteria met, and the last one by a CI run rather
+  than by a document.**
+
+  Run `31228658565` at `66cf6f4` is green on ubuntu, windows and macos — vet plus tests at both
+  `Term_ID` widths, **73 tests per width**: `store` 5, `store/kvstore` 64, `tests/readme` 4,
+  against 40 before this initiative and STORE-T-0033 began. **Released as v0.3.0**, tagged at
+  that commit with a GitHub release, the number following the CHANGELOG's own rule rather than
+  taste: two changed public signatures are a breaking change under 0.x however small their
+  reach.
+
+  **The Windows number arrived where STORE-T-0033 predicted it, which is worth recording
+  because that item's whole case was a projection.** The job ran **41s against 64s before,
+  while running 83% more tests** — roughly 2.5× faster per test, on the platform whose slowness
+  was the argument. Job wall-clock includes checkout and setup, so it understates the change.
+  The 16 MiB map was measured against every RDF document vendored in the family's suites rather
+  than picked, and it behaved as measured.
+
+  **What this initiative did not deliver, stated plainly so the record is not stronger than the
+  evidence.** Validate-before-commit is *expressible* and demonstrated by a conformance check
+  that fails in the documented way when the property is broken — verified by mutation, not
+  assumed. It is not yet *reachable* for the consumer that asked for it: odin-rdf-shacl's
+  `Access` adapters still bind to a bare store, so `odin-rdf-app`'s validator still cannot see
+  the write it is deciding about. That is odin-rdf-shacl's to sequence, which is why it was
+  never an exit criterion here.
+
+  **STORE-T-0041 moved to the backlog unstarted rather than being archived with this
+  document**, mirroring what STORE-I-0003 did with `open_ephemeral`: the question outlives the
+  initiative that raised it, and burying a live proposal inside a closed initiative is how it
+  gets reconstructed from scratch a month later. It carries the evidence for both siblings and
+  the note that filing in a sibling repo is raised first.
+
+  **What comes next, unblocked by this rather than part of it.** `remove` (STORE-T-0023) and
+  `insert_all` (STORE-T-0024) both get simpler now and were held out by STORE-A-0007's scope
+  guard; `remove` is the one that changes STORE-I-0001 decision 5's append-only stance, so it
+  is a decision of its own. The five planner-support items stay where they are: their consumer
+  is a query planner that does not exist. And SPARQL-T-0021 (term identity) is still filed in
+  the wrong repo — it is a store dictionary decision, and taking it downstream means the same
+  document loaded twice yields different terms.
