@@ -1,18 +1,18 @@
 ---
-id: proposals-to-shacl-and-sparql-bind
+id: proposals-to-odin-rdf-shacl-and
 level: task
 title: "Proposals to odin-rdf-shacl and odin-rdf-sparql: bind reads to a transaction"
 short_code: "STORE-T-0041"
-created_at: 2026-08-07T22:15:28.000000+00:00
-updated_at: 2026-08-07T22:15:28.000000+00:00
+created_at: 2026-08-07T22:15:28+00:00
+updated_at: 2026-08-08T00:06:48.437449+00:00
 parent: 
-blocked_by: ["STORE-T-0037"]
+blocked_by: [STORE-T-0037]
 archived: false
 
 tags:
   - "#task"
   - "#feature"
-  - "#phase/backlog"
+  - "#phase/completed"
 
 
 exit_criteria_met: false
@@ -59,23 +59,25 @@ The shacl half is what actually closes odin-rdf-app's P0, so it is higher than t
 sparql half would carry alone. It is not P0 itself because the fix is not this repo's to make
 — odin-rdf-store's half shipped in v0.3.0.
 
+## Acceptance Criteria
+
 ## Acceptance Criteria **[REQUIRED]**
 
-- [ ] A backlog item filed in **odin-rdf-shacl**'s `.metis/` proposing that the `Access`
+- [x] A backlog item filed in **odin-rdf-shacl**'s `.metis/` proposing that the `Access`
       adapters bind to a `^Txn` rather than a bare store, carrying: the validate-before-commit
       evidence from STORE-T-0022, the published handle's shape, the named call sites, and the
       **cost stated as contract** — a write transaction held across an entire validation
       serializes every other writer against that environment for its lifetime, by construction.
-- [ ] A backlog item filed in **odin-rdf-sparql**'s `.metis/` proposing a read transaction
+- [x] A backlog item filed in **odin-rdf-sparql**'s `.metis/` proposing a read transaction
       taken at `query_init` and released at `query_destroy`, carrying STORE-T-0019's five-read
       evidence, the `NOW()` precedent the item itself cites (a query's answer is a snapshot
       rather than a smear, at the clock instead of at the data), and the page-pinning cost.
-- [ ] Both proposals state explicitly that they are **additive on those sides too** — the bare
+- [x] Both proposals state explicitly that they are **additive on those sides too** — the bare
       procedures survive, so an adapter that does not take a transaction keeps working.
-- [ ] Both name the store version that publishes the handle, so the pin is unambiguous.
-- [ ] **Neither implementation is an exit criterion of anything here.** This item is complete
+- [x] Both name the store version that publishes the handle, so the pin is unambiguous.
+- [x] **Neither implementation is an exit criterion of anything here.** This item is complete
       when the proposals are filed; the sibling work is theirs to sequence.
-- [ ] **Raised with Greger before filing.** Filing in a sibling repo is the intended channel
+- [x] **Raised with Greger before filing.** Filing in a sibling repo is the intended channel
       for a cross-repo proposal, and it is still raised first.
 
 ## Implementation Notes **[CONDITIONAL: Technical Task]**
@@ -139,3 +141,43 @@ estimate.
   the temp-path dance await `open_ephemeral` (STORE-T-0033), and that is where the Windows CI
   minutes actually are — shacl 211s, sparql >20 min, against this repo's 41s. Two proposals
   per sibling, one conversation.
+
+- **2026-08-08 — Filed. Both proposals are in, and the item is complete: SHACL-T-0029 and
+  SPARQL-T-0024.** Nothing in any repo's source changed, here or there.
+
+  **The call sites were read before either was written**, because a proposal that names files
+  and procedures is the one that gets picked up — the standard SHACL-T-0028 and SPARQL-T-0023
+  set when they reported the temp-path duplication upstream. Both turned out smaller than the
+  estimate implied, and in the same way: each repo already threads a `Session` struct that is
+  the natural home for a transaction, so the change is one field plus seven call sites, each of
+  which is named with its line.
+
+  **The two proposals are genuinely different arguments, which is why they were not written
+  once and copied.**
+
+  *odin-rdf-shacl (P1).* This is the last hop of odin-rdf-app's P0 and it is framed as such:
+  the store made validate-before-commit *possible*, this makes it *reachable*. Its
+  acceptance criteria ask for the vacuity case as the test — pre-existing data, a candidate in
+  a write transaction, and a constraint that violates only because the pre-existing data is
+  visible, with the same candidate passing in isolation. That last assertion is what makes the
+  test about the feature rather than about SHACL.
+
+  *odin-rdf-sparql (P2).* This one closes a loop rather than opening one — SPARQL-T-0019 sent
+  the evidence upstream, STORE-A-0007 answered it, and the answer matches that repo's original
+  framing exactly. It is careful not to inflate the priority: nothing is wrong today, all 483
+  evaluation tests pass, and it becomes a bug only when something writes concurrently.
+
+  **One question was left to the receiving repo rather than decided for it**, and it is real:
+  whether the transaction should be *optional* on sparql's side. Always taking a read
+  transaction at `query_init` is simpler and strictly more correct, but a consumer wanting to
+  run a query inside a write transaction it already holds needs to supply one — and an
+  unconditional transaction also leaves the autocommit branch of those adapters with no test.
+  shacl has no such question: a caller validating inside its own transaction is the entire
+  point there.
+
+  **Both were paired with the temp-path work each repo had already reported upstream**, since
+  bumping the CI pin to v0.3.0 is the prerequisite for both and there is no reason to do it
+  twice. That is where the Windows CI evidence lands: shacl 211s against ubuntu's 17s, sparql
+  over 20 minutes against 28s, both for the same reason — one 1 GiB store materialized per
+  test on a platform with no sparse-file handling. odin-rdf-store's own job went 64s → 41s
+  while running 83% more tests after adopting `open_ephemeral`.
