@@ -286,6 +286,28 @@ open :: proc(path: string, opts := DEFAULT_OPTIONS, allocator := context.allocat
 // synchronization at all. Do not hand an ephemeral store to a child
 // process.
 //
+// **NOLOCK also gives up the reader table, and that is a rule about
+// this process, not only about others.** LMDB's contract for the flag
+// is that the caller "must enforce single-writer semantics, and must
+// ensure that no readers are using old transactions while a writer is
+// active". The reader table is how a writer learns which pages a live
+// reader still needs; without it, a writer may recycle pages out from
+// under an open read transaction. So on an ephemeral store:
+//
+//   - do not hold a read transaction (or a match iterator, which owns
+//     one) across a commit;
+//   - do not open a read while a write transaction is open, including
+//     the implicit read that every bare procedure performs.
+//
+// Sequential use — load, then read, then load again — is fine, and is
+// what a test fixture does. **The failure mode is what makes this worth
+// stating**: it does not fault, it hands back a stale or reused page,
+// and on a small dataset the freelist never wraps so nothing is ever
+// reused and the mistake passes indefinitely. odin-rdf-shacl wrote two
+// tests that overlapped a reader with a writer, and they passed on
+// every platform until someone read this flag's contract. A store whose
+// test deliberately overlaps the two wants open, which locks.
+//
 // opts.read_only is ignored: a read-only store that no one can ever
 // write to is empty forever. Everything else is honoured; see
 // EPHEMERAL_OPTIONS for why the default map is 16 MiB rather than
