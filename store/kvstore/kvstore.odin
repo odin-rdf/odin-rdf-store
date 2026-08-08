@@ -41,6 +41,7 @@ package kvstore
 import "core:encoding/endian"
 import "core:os"
 import "core:strings"
+import "core:time"
 
 import lmdb "../../vendor/lmdb"
 import store ".."
@@ -356,20 +357,53 @@ ephemeral_reserve :: proc(allocator := context.allocator) -> (path: string, err:
 	// An empty dir means the OS temp directory, resolved by core:os:
 	// TMPDIR on POSIX, GetTempPathW on Windows. That is the dance this
 	// procedure exists to stop everyone copying.
-	f, ferr := os.create_temp_file("", "odin-rdf-store-*.mdb")
-	if ferr != nil {
-		// The OS error verbatim, not a classification of it. This
-		// returned .Temp_Unavailable until 2026-08-08, which said that
-		// something went wrong and nothing about what: an intermittent
-		// Windows failure in odin-rdf-shacl's suite was undiagnosable
-		// from CI output because the one fact that mattered had been
-		// thrown away here.
-		return "", ferr
+	// **Reserving is retried, because on Windows it transiently fails.**
+	// odin-rdf-shacl's suite opens ~58 ephemeral stores across ten
+	// threads and saw one or two per run fail with Permission_Denied —
+	// ERROR_ACCESS_DENIED from CREATE_NEW on a fresh random name in the
+	// temp directory, a different test each run. That is not a name
+	// collision, which Windows reports as ERROR_ALREADY_EXISTS; it is
+	// the signature of something else on the machine holding a file
+	// briefly, which on a CI runner means a scanner or the indexer.
+	//
+	// os.create_temp_file retries only on .Exist, so it gives up on the
+	// first such failure. Creating a temp file is idempotent and
+	// cheap, so this retries anything, with a short pause between
+	// attempts: a condition that clears in milliseconds is worth
+	// waiting out, and one that does not is reported rather than
+	// retried forever.
+	//
+	// The last error is what comes back, so a genuinely unusable temp
+	// directory still says why on the way out.
+	last: os.Error
+	for attempt in 0 ..< RESERVE_ATTEMPTS {
+		f, ferr := os.create_temp_file("", "odin-rdf-store-*.mdb")
+		if ferr == nil {
+			path = strings.clone(os.name(f), allocator)
+			os.close(f)
+			return path, nil
+		}
+		last = ferr
+		if attempt < RESERVE_ATTEMPTS - 1 {
+			time.sleep(RESERVE_BACKOFF)
+		}
 	}
-	path = strings.clone(os.name(f), allocator)
-	os.close(f)
-	return path, nil
+	// The OS error verbatim, not a classification of it. This returned
+	// .Temp_Unavailable until 2026-08-08, which said that something
+	// went wrong and nothing about what: the Windows failure above was
+	// undiagnosable from CI output because the one fact that mattered
+	// had been thrown away here.
+	return "", last
 }
+
+// Eight attempts over roughly 35ms. Sized for a transient hold by
+// another process, not for a temp directory that is full or read-only —
+// those fail eight times quickly and report what they said.
+@(private)
+RESERVE_ATTEMPTS :: 8
+
+@(private)
+RESERVE_BACKOFF :: 5 * time.Millisecond
 
 // close releases the environment; every ID, iterator, and borrowed
 // value obtained from the store becomes invalid. An ephemeral store's

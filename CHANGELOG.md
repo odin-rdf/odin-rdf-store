@@ -7,6 +7,60 @@ changes land.
 The `.metis/` directory holds the reasoning behind everything here — the vision, the
 initiatives, and the ADRs each entry cites.
 
+## 0.4.0 — 2026-08-08
+
+### Fixed
+
+- **`open_ephemeral` retries its reservation.** odin-rdf-shacl's Windows CI failed
+  intermittently under `open_ephemeral` — one or two of ~58 opens per run, a different
+  test each time — with `ERROR_ACCESS_DENIED` from `CREATE_NEW` on a *fresh random name*
+  in the temp directory. That is not a name collision, which Windows reports as
+  `ERROR_ALREADY_EXISTS` and `os.create_temp_file` already retries; it is another process
+  holding a file briefly, which on a CI runner means a scanner or the indexer. Our own
+  file lifecycle was excluded first: `close` calls `env_close` before `os.remove`, so the
+  store never leaves a delete-pending name behind.
+
+  Reserving is idempotent and cheap, so it now retries anything — eight attempts over
+  roughly 35ms — and returns the last error verbatim if they all fail. A temp directory
+  that is genuinely full or read-only still fails quickly and says why.
+
+  **This is mitigation of a transient OS condition, not a root cause.** The condition is
+  outside this library; what was wrong here is that a single attempt was treated as a
+  verdict.
+
+### Changed
+
+- **`Error` carries `os.Error`, and `ephemeral_reserve` returns what the OS said.**
+  The reservation used to collapse every failure from `os.create_temp_file` into
+  `Store_Error.Temp_Unavailable`, which reported that something had gone wrong and
+  nothing about what — the failure above was undiagnosable from CI output for exactly
+  that reason. A classification is worth less than the error it classifies. **This is
+  what found the bug above**, on the first CI run after a consumer pinned it.
+
+### Removed
+
+- **`Store_Error.Temp_Unavailable`**, which now has no producer. Its meaning is carried
+  by the `os.Error` the reservation returns, in more detail than it could express.
+
+### Added
+
+- `test_many_ephemeral_stores_open_at_once`, asserting the workload rather than the
+  primitive. `test_ephemeral_names_never_collide` reserves names concurrently and passes
+  everywhere including Windows, which is why it did not catch this: reservation is half
+  of `open_ephemeral`, and the other half is an LMDB environment that materializes its
+  whole `map_size` on open under Windows. A consumer's suite holds a dozen of those open
+  at once, and that is what this test does. It passes on all three platforms, so it does
+  not reproduce the failure either — recorded as a negative result rather than left as a
+  gap.
+
+### A note on 0.3.1
+
+`0.3.1` published the `Changed` and `Removed` entries above under a patch number. This
+file's own rule is that while the major version is 0, a **minor** bump is where breaking
+changes land, and removing an enum member and adding a union variant is breaking. `0.4.0`
+is the number those changes should have carried. `0.3.1` remains published and is a valid
+snapshot of a green tree; nothing in the family depends on it.
+
 ## 0.3.1 — 2026-08-08
 
 ### Changed
