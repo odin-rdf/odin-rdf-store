@@ -7,6 +7,32 @@ changes land.
 The `.metis/` directory holds the reasoning behind everything here — the vision, the
 initiatives, and the ADRs each entry cites.
 
+## Unreleased
+
+### Changed
+
+- **`Error` carries `os.Error`, and `ephemeral_reserve` returns what the OS said.**
+  `open_ephemeral`'s reservation used to collapse every failure from
+  `os.create_temp_file` into `Store_Error.Temp_Unavailable`, which reported that
+  something had gone wrong and nothing about what. odin-rdf-shacl's Windows CI began
+  failing intermittently — two of ~58 ephemeral opens, a different test each run — and
+  the one fact needed to diagnose it had been discarded here. A classification is worth
+  less than the error it classifies.
+
+### Removed
+
+- **`Store_Error.Temp_Unavailable`**, which now has no producer. Its meaning is carried
+  by the `os.Error` the reservation returns, in more detail than it could express.
+
+### Added
+
+- `test_many_ephemeral_stores_open_at_once`, asserting the workload rather than the
+  primitive. `test_ephemeral_names_never_collide` reserves names concurrently and passes
+  everywhere including Windows, which is why it did not catch this: reservation is half
+  of `open_ephemeral`, and the other half is an LMDB environment that materializes its
+  whole `map_size` on open under Windows. A consumer's suite holds a dozen of those open
+  at once, and that is what this test does.
+
 ## 0.3.0 — 2026-08-08
 
 ### Added

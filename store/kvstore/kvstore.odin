@@ -85,6 +85,7 @@ meta_counter_keys :: [4]string{"next_iri", "next_blank", "next_literal", "next_t
 Error :: union {
 	Db_Error,
 	Store_Error,
+	os.Error,
 }
 
 // Db_Error is a raw LMDB return code; see error_string.
@@ -93,9 +94,6 @@ Db_Error :: distinct i32
 Store_Error :: enum {
 	// The database's format version is unknown to this code.
 	Unsupported_Format,
-	// No writable temporary location was available, so an ephemeral
-	// store could not reserve a file to live in; see open_ephemeral.
-	Temp_Unavailable,
 	// The database was created with the other Term_ID width
 	// (STORE-A-0001: widths never mix silently).
 	Width_Mismatch,
@@ -360,7 +358,13 @@ ephemeral_reserve :: proc(allocator := context.allocator) -> (path: string, err:
 	// procedure exists to stop everyone copying.
 	f, ferr := os.create_temp_file("", "odin-rdf-store-*.mdb")
 	if ferr != nil {
-		return "", .Temp_Unavailable
+		// The OS error verbatim, not a classification of it. This
+		// returned .Temp_Unavailable until 2026-08-08, which said that
+		// something went wrong and nothing about what: an intermittent
+		// Windows failure in odin-rdf-shacl's suite was undiagnosable
+		// from CI output because the one fact that mattered had been
+		// thrown away here.
+		return "", ferr
 	}
 	path = strings.clone(os.name(f), allocator)
 	os.close(f)

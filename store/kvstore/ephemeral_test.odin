@@ -192,3 +192,84 @@ test_ephemeral_map_holds_a_suite_sized_load :: proc(t: ^testing.T) {
 	testing.expect(t, cerr == nil)
 	testing.expect_value(t, n, QUADS)
 }
+
+// Many whole stores, open at once (2026-08-08).
+//
+// `test_ephemeral_names_never_collide` above reserves names concurrently
+// and passes everywhere, including Windows — which is exactly why it did
+// not catch this. Reservation is only the first half of open_ephemeral;
+// the second half is an LMDB environment, and on Windows an environment
+// materializes its whole map_size on disk the moment it opens. What a
+// consumer's suite actually does is hold a dozen of those open at once,
+// and odin-rdf-shacl's Windows job began failing intermittently with a
+// reservation error under precisely that load, on two of ~58 opens, a
+// different test each run.
+//
+// So this asserts the workload rather than the primitive: STORE_THREADS
+// stores per thread, opened, used, and held until the batch is done. A
+// failure here reports what the OS said, which is the whole reason
+// ephemeral_reserve stopped classifying its errors.
+@(private = "file")
+STORE_THREADS :: 8
+
+@(private = "file")
+STORES_PER_THREAD :: 8
+
+@(private = "file")
+Opener :: struct {
+	stores: [STORES_PER_THREAD]^Store,
+	err:    Error,
+	at:     int,
+}
+
+@(private = "file")
+open_worker :: proc(w: ^Opener) {
+	context.allocator = runtime.heap_allocator()
+	for i in 0 ..< STORES_PER_THREAD {
+		s, err := open_ephemeral()
+		if err != nil {
+			w.err = err
+			w.at = i
+			return
+		}
+		w.stores[i] = s
+		// Write something, so the environment is not merely opened: a
+		// map that is materialized but never touched is not the thing
+		// the consumers do.
+		ttl := `<http://example.org/s> <http://example.org/p> <http://example.org/o> .`
+		if _, _, load_err := load_triples(s, transmute([]u8)ttl); load_err != nil {
+			w.err = load_err
+			w.at = i
+			return
+		}
+	}
+}
+
+@(test)
+test_many_ephemeral_stores_open_at_once :: proc(t: ^testing.T) {
+	workers: [STORE_THREADS]Opener
+	threads: [STORE_THREADS]^thread.Thread
+	for i in 0 ..< STORE_THREADS {
+		threads[i] = thread.create_and_start_with_poly_data(&workers[i], open_worker)
+	}
+	for th in threads {
+		thread.join(th)
+		thread.destroy(th)
+	}
+
+	opened := 0
+	for &w in workers {
+		testing.expectf(t, w.err == nil, "opening store %d of this thread's batch failed: %v", w.at, w.err)
+		for s in w.stores {
+			if s == nil {
+				continue
+			}
+			opened += 1
+			n, cerr := count(s)
+			testing.expect(t, cerr == nil)
+			testing.expect_value(t, n, 1)
+			close(s, runtime.heap_allocator())
+		}
+	}
+	testing.expect_value(t, opened, STORE_THREADS * STORES_PER_THREAD)
+}
